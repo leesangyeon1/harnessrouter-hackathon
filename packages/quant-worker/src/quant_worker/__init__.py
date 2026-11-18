@@ -10,12 +10,28 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict
-from typing import Any
+from http.client import HTTPMessage
+from typing import IO, Any
 from urllib.parse import urlsplit
 
 from finance_core.quant import Bar, ModePolicy, TradeCosts, evaluate, select_winner
 
 POLL_SECONDS = 30
+
+
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow no redirect: urllib would send the worker token on to wherever one points."""
+
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: IO[bytes],
+        code: int,
+        msg: str,
+        headers: HTTPMessage,
+        newurl: str,
+    ) -> None:
+        return None
 
 
 class WorkerApi:
@@ -26,6 +42,7 @@ class WorkerApi:
             raise ValueError("the worker API must be reached over HTTPS")
         self._base_url = base_url.rstrip("/")
         self._token = token
+        self._opener = urllib.request.build_opener(_NoRedirects)
 
     def _send(self, method: str, path: str, body: object = None) -> Any:
         request = urllib.request.Request(  # noqa: S310 - the scheme is checked in __init__
@@ -34,8 +51,12 @@ class WorkerApi:
             method=method,
             headers={"Authorization": f"Bearer {self._token}", "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
-            payload = response.read()
+        try:
+            with self._opener.open(request, timeout=60) as response:
+                payload = response.read()
+        except urllib.error.HTTPError as error:
+            error.close()  # an error answer keeps its connection until it is closed
+            raise
         return json.loads(payload) if payload else None
 
     def claim(self) -> dict[str, Any] | None:
