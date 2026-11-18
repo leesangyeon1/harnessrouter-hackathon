@@ -2,7 +2,6 @@
 
 import time
 from collections.abc import Callable, Iterator
-from typing import Any
 from uuid import uuid4
 
 import jwt
@@ -11,11 +10,12 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from jwt.algorithms import RSAAlgorithm
 from psycopg_pool import ConnectionPool
 
 from finance_api.app import app_from_env, create_app
 from finance_api.auth import IdTokenVerifier
+from finance_api.plaid import PlaidClient
+from finance_api.sealing import SecretBox
 from finance_api.worker_api import hash_token
 
 PROJECT = "demo-project"
@@ -26,48 +26,17 @@ ADMIN_ACTION = "/v1/admin/worker-tokens"
 MakeToken = Callable[..., str]
 
 
-@pytest.fixture(scope="module")
-def private_key() -> rsa.RSAPrivateKey:
-    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-
-@pytest.fixture(scope="module")
-def make_token(private_key: rsa.RSAPrivateKey) -> MakeToken:
-    """An ID token as Identity Platform issues it. A keyword replaces a claim; None removes it."""
-
-    def make(**claims: Any) -> str:
-        now = int(time.time())
-        payload = {
-            "iss": f"https://securetoken.google.com/{PROJECT}",
-            "aud": PROJECT,
-            "sub": USER,
-            "iat": now,
-            "exp": now + 3600,
-        } | claims
-        present = {name: value for name, value in payload.items() if value is not None}
-        return jwt.encode(present, private_key, algorithm="RS256", headers={"kid": KID})
-
-    return make
-
-
-def _app(api_url: str, signing_key: Callable[[str], jwt.PyJWK]) -> FastAPI:
-    app = create_app(ConnectionPool(api_url, open=False), IdTokenVerifier(PROJECT, signing_key))
+def _app(api_url: str, verifier: IdTokenVerifier, plaid: PlaidClient, box: SecretBox) -> FastAPI:
+    app = create_app(ConnectionPool(api_url, open=False), verifier, plaid, box)
     app.get("/declares-no-sign-in")(lambda: {"ok": True})
     return app
 
 
 @pytest.fixture
-def client(api_url: str, private_key: rsa.RSAPrivateKey) -> Iterator[TestClient]:
-    public_key = jwt.PyJWK(
-        RSAAlgorithm.to_jwk(private_key.public_key(), as_dict=True), algorithm="RS256"
-    )
-
-    def signing_key(token: str) -> jwt.PyJWK:
-        if jwt.get_unverified_header(token).get("kid") != KID:
-            raise jwt.PyJWKClientError("no signing key matches the token's kid")
-        return public_key
-
-    with TestClient(_app(api_url, signing_key)) as test_client:
+def client(
+    api_url: str, verifier: IdTokenVerifier, no_plaid: PlaidClient, secret_box: SecretBox
+) -> Iterator[TestClient]:
+    with TestClient(_app(api_url, verifier, no_plaid, secret_box)) as test_client:
         yield test_client
 
 
@@ -150,12 +119,13 @@ def test_signed_in_request_is_served_as_its_user(client: TestClient, make_token:
 
 
 def test_unreachable_key_service_is_not_reported_as_a_bad_token(
-    api_url: str, make_token: MakeToken
+    api_url: str, make_token: MakeToken, no_plaid: PlaidClient, secret_box: SecretBox
 ) -> None:
     def signing_key(token: str) -> jwt.PyJWK:
         raise jwt.PyJWKClientConnectionError("key service unreachable")
 
-    with TestClient(_app(api_url, signing_key), raise_server_exceptions=False) as client:
+    app = _app(api_url, IdTokenVerifier(PROJECT, signing_key), no_plaid, secret_box)
+    with TestClient(app, raise_server_exceptions=False) as client:
         response = client.get("/v1/me", headers=_bearer(make_token()))
 
     assert response.status_code == 500
@@ -264,10 +234,13 @@ def test_id_token_is_refused_by_the_worker_api(client: TestClient, make_token: M
 
 
 def test_service_built_from_the_environment_verifies_tokens(
-    api_url: str, monkeypatch: pytest.MonkeyPatch
+    api_url: str, secret_box_key: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DATABASE_URL", api_url)
     monkeypatch.setenv("IDENTITY_PROJECT_ID", PROJECT)
+    monkeypatch.setenv("PLAID_CLIENT_ID", "client-id")
+    monkeypatch.setenv("PLAID_SECRET", "secret")
+    monkeypatch.setenv("SECRET_BOX_KEY", secret_box_key)
 
     with TestClient(app_from_env()) as client:
         response = client.get("/v1/me")

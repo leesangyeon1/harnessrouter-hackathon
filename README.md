@@ -32,8 +32,14 @@ for the session. To use a server of your own, set `TEST_DATABASE_URL` to a super
 ```sh
 DATABASE_URL=<migration role's URL> uv run --all-packages python -m finance_api.migrate
 DATABASE_URL=<API role's URL> IDENTITY_PROJECT_ID=<project id> \
+PLAID_CLIENT_ID=<id> PLAID_SECRET=<Sandbox secret> SECRET_BOX_KEY=<Fernet key> \
   uv run --all-packages uvicorn finance_api.app:app_from_env --factory
 ```
+
+`SECRET_BOX_KEY` seals Plaid access tokens at rest. Generate one with
+`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` and
+keep it in Secret Manager. Plaid is reached at `sandbox.plaid.com` only: the service refuses to
+start if `PLAID_HOST` names any other host.
 
 ## Running a worker on a node
 

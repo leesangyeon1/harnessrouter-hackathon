@@ -8,14 +8,20 @@ from typing import Annotated
 from uuid import UUID, uuid4
 
 import jwt
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
+from finance_api import plaid_ingest
 from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
+from finance_api.plaid import PlaidClient, PlaidError, plaid_client_from_env
+from finance_api.sealing import SecretBox
 from finance_api.worker_api import create_worker_app, hash_token
 
 
-def create_app(pool: ConnectionPool, verifier: IdTokenVerifier) -> FastAPI:
+def create_app(
+    pool: ConnectionPool, verifier: IdTokenVerifier, plaid: PlaidClient, box: SecretBox
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         pool.open()
@@ -35,6 +41,16 @@ def create_app(pool: ConnectionPool, verifier: IdTokenVerifier) -> FastAPI:
     )
     app.state.pool = pool
     app.state.verifier = verifier
+    app.state.plaid = plaid
+    app.state.box = box
+    app.include_router(plaid_ingest.router)
+
+    @app.exception_handler(PlaidError)
+    def plaid_refused(_: Request, error: PlaidError) -> JSONResponse:
+        return JSONResponse(
+            {"detail": f"Plaid refused the request ({error.code})"},
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        )
 
     @app.get("/v1/me")
     def me(
@@ -98,4 +114,5 @@ def app_from_env() -> FastAPI:
     pool = ConnectionPool(os.environ["DATABASE_URL"], open=False)
     keys = jwt.PyJWKClient(JWKS_URL)
     verifier = IdTokenVerifier(os.environ["IDENTITY_PROJECT_ID"], keys.get_signing_key_from_jwt)
-    return create_app(pool, verifier)
+    box = SecretBox(os.environ["SECRET_BOX_KEY"])
+    return create_app(pool, verifier, plaid_client_from_env(), box)

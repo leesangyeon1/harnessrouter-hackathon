@@ -25,6 +25,8 @@ from psycopg_pool import ConnectionPool
 
 from finance_api.app import create_app
 from finance_api.auth import IdTokenVerifier
+from finance_api.plaid import PlaidClient
+from finance_api.sealing import SecretBox
 from finance_api.worker_api import hash_token
 from finance_core.quant import (
     MODEL_IDS,
@@ -53,7 +55,9 @@ class Unit:
 
 
 @pytest.fixture(scope="module")
-def api(_migrated_urls: tuple[str, str]) -> Iterator[str]:
+def api(
+    _migrated_urls: tuple[str, str], no_plaid: PlaidClient, secret_box: SecretBox
+) -> Iterator[str]:
     """Base URL of the service, listening on a free loopback port."""
 
     def no_id_token(token: str) -> jwt.PyJWK:
@@ -62,6 +66,8 @@ def api(_migrated_urls: tuple[str, str]) -> Iterator[str]:
     app = create_app(
         ConnectionPool(_migrated_urls[1], open=False),
         IdTokenVerifier("demo-project", no_id_token),
+        no_plaid,
+        secret_box,
     )
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
