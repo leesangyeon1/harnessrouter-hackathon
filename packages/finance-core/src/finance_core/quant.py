@@ -115,7 +115,18 @@ class Bar:
     volume: float
 
     def __post_init__(self) -> None:
-        date.fromisoformat(self.date)
+        # PostgreSQL/API/worker boundaries all use floats. Normalize at entry so
+        # equivalent JSON numbers (100 and 100.0) have the same pinned identity.
+        object.__setattr__(self, "date", date.fromisoformat(self.date).isoformat())
+        for field in ("open", "high", "low", "close", "volume"):
+            value = getattr(self, field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("bar fields must be JSON numbers")
+            try:
+                normalized = float(value)
+            except OverflowError as error:
+                raise ValueError("bar fields must be finite") from error
+            object.__setattr__(self, field, 0.0 if normalized == 0 else normalized)
         values = (self.open, self.high, self.low, self.close, self.volume)
         if not all(math.isfinite(v) for v in values):
             raise ValueError("bar fields must be finite")

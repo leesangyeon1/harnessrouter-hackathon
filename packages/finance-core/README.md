@@ -32,6 +32,11 @@ uv run --all-packages mypy --strict packages/finance-core/src
   ISO dates and finite, positive, consistent OHLC prices. Feed split-adjusted
   daily bars through the preceding cycle day. Filter crypto to the same broker
   equity-calendar dates before quant evaluation.
+  Construction normalizes numeric fields to floats and dates to `YYYY-MM-DD`,
+  including zero volume to `0.0`; booleans are refused. Equivalent JSON numbers
+  such as `100` and `100.0` therefore share the same bars hash across ingestion,
+  PostgreSQL/API conversion and worker download. Existing canonical float/date
+  payloads keep their hashes and shape.
 - `quant.evaluate(bars, sector="stock", policy=policy, costs=costs)` requires 250 bars,
   takes the last 500, and returns eleven `ModelResult` dataclasses: M00 baseline
   plus ten strategies. Each carries model-set version `daily-v1`, policy version,

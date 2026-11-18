@@ -14,6 +14,7 @@ from finance_core.quant import (
     TradeCosts,
     account_step,
     backtest,
+    bars_digest,
     evaluate,
     metrics,
     positions,
@@ -39,6 +40,39 @@ def series(count=300):
 
 
 class QuantTests(unittest.TestCase):
+    def test_bar_identity_survives_json_numeric_normalization(self):
+        integer_bar = Bar("2024-01-01", 100, 101, 99, 100, 1000)
+        float_bar = Bar("2024-01-01", 100.0, 101.0, 99.0, 100.0, 1000.0)
+        self.assertEqual(integer_bar, float_bar)
+        self.assertEqual(bars_digest([integer_bar]), bars_digest([float_bar]))
+        # The API reads PostgreSQL numeric fields as floats; the worker reads JSON.
+        api_wire = {
+            key: float(value) if key != "date" else value
+            for key, value in asdict(integer_bar).items()
+        }
+        restored = Bar(**json.loads(json.dumps(api_wire)))
+        self.assertEqual(bars_digest([integer_bar]), bars_digest([restored]))
+
+    def test_equivalent_date_and_zero_volume_have_one_identity(self):
+        canonical = Bar("2024-01-01", 100.0, 101.0, 99.0, 100.0, 0.0)
+        alternate = Bar("20240101", 100, 101, 99, 100, -0.0)
+        self.assertEqual(asdict(canonical), asdict(alternate))
+        self.assertEqual(bars_digest([canonical]), bars_digest([alternate]))
+
+    def test_boolean_bar_values_are_not_numbers(self):
+        for field in ("open", "high", "low", "close", "volume"):
+            values = {
+                "date": "2024-01-01",
+                "open": 1.0,
+                "high": 2.0,
+                "low": 1.0,
+                "close": 1.0,
+                "volume": 1.0,
+            }
+            values[field] = True
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                Bar(**values)
+
     def test_ten_models_plus_unranked_baseline(self):
         self.assertEqual(
             MODEL_IDS, ("M00", "M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M10", "M11")
