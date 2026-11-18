@@ -41,4 +41,8 @@ files = ["apps/api/src", "apps/api/tests"]
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib --strict-markers -ra"
 testpaths = ["apps"]
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # Starlette's test client asks for httpx2 in place of httpx. Tests only; nothing ships with it.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
