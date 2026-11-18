@@ -1,0 +1,22 @@
+# Example Terraform 1.6+ declarative `import` blocks for adopting existing GCP resources
+# instead of creating duplicates. Copy needed blocks into `imports.tf` before `terraform plan`.
+
+# Option A: Reuse an existing Cloud SQL instance without importing by setting in terraform.tfvars:
+#   create_cloud_sql_instance        = false
+#   existing_cloud_sql_instance_name = "my-existing-pg16"
+
+# Option B: Adopt an existing Cloud SQL instance into Terraform management:
+# import {
+#   to = google_sql_database_instance.postgres[0]
+#   id = "projects/<PROJECT_ID>/instances/<EXISTING_SQL_INSTANCE>"
+# }
+
+# Option C: Reuse an existing Artifact Registry repository without importing:
+#   create_artifact_registry           = false
+#   existing_artifact_registry_repo_id = "my-existing-repo"
+
+# Option D: Adopt existing Secret Manager secret containers:
+# import {
+#   to = google_secret_manager_secret.managed["plaid_secret"]
+#   id = "projects/<PROJECT_ID>/secrets/hr-finance-prod-plaid-secret"
+# }

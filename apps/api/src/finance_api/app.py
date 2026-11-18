@@ -2,26 +2,60 @@
 
 import os
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from typing import Annotated
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
 from finance_api import plaid_ingest, reports
 from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
+from finance_api.db import create_pool
+from finance_api.health import create_health_app
+from finance_api.observability import (
+    CorrelationMiddleware,
+    configure_cloud_logging,
+    register_secret_for_redaction,
+)
 from finance_api.plaid import PlaidClient, PlaidError, plaid_client_from_env
 from finance_api.sealing import SecretBox
 from finance_api.worker_api import create_worker_app, hash_token
 
 
+def _validate_cors_origins(origins: Sequence[str]) -> list[str]:
+    validated: list[str] = []
+    for raw in origins:
+        origin = raw.strip().rstrip("/")
+        if not origin:
+            continue
+        if origin == "*":
+            raise ValueError("wildcard CORS origin '*' is not permitted")
+        parsed = urlsplit(origin)
+        is_loopback = parsed.scheme == "http" and parsed.hostname in ("localhost", "127.0.0.1")
+        if parsed.scheme != "https" and not is_loopback:
+            raise ValueError(f"CORS origin {origin!r} must use HTTPS")
+        if not parsed.netloc or parsed.path or parsed.query or parsed.fragment:
+            raise ValueError(f"CORS origin {origin!r} must be scheme://host[:port] only")
+        validated.append(origin)
+    return validated
+
+
 def create_app(
-    pool: ConnectionPool, verifier: IdTokenVerifier, plaid: PlaidClient, box: SecretBox
+    pool: ConnectionPool,
+    verifier: IdTokenVerifier,
+    plaid: PlaidClient,
+    box: SecretBox,
+    *,
+    cors_origins: Sequence[str] = (),
 ) -> FastAPI:
+    allowed_origins = _validate_cors_origins(cors_origins)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         pool.open()
@@ -31,7 +65,7 @@ def create_app(
             pool.close()
 
     # Every route requires a valid ID token. The generated docs routes would not, so there are none.
-    # The worker API is mounted apart, because it takes a worker token and never an ID token.
+    # Worker and health routes are mounted apart so /v1/* keeps strict ID-token enforcement.
     app = FastAPI(
         lifespan=lifespan,
         dependencies=[Depends(current_user)],
@@ -43,6 +77,16 @@ def create_app(
     app.state.verifier = verifier
     app.state.plaid = plaid
     app.state.box = box
+    app.add_middleware(CorrelationMiddleware)
+    if allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Idempotency-Key"],
+            expose_headers=["X-Request-ID"],
+        )
     app.include_router(plaid_ingest.router)
     app.include_router(reports.router)
 
@@ -107,13 +151,23 @@ def create_app(
         if revoked is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no live worker token has this id")
 
+    app.mount("/health", create_health_app(pool))
     app.mount("/worker/v1", create_worker_app(pool))
     return app
 
 
 def app_from_env() -> FastAPI:
-    pool = ConnectionPool(os.environ["DATABASE_URL"], open=False)
+    project_id = os.environ["IDENTITY_PROJECT_ID"]
+    configure_cloud_logging(project_id)
+    register_secret_for_redaction(
+        os.environ.get("DATABASE_URL"),
+        os.environ.get("PLAID_SECRET"),
+        os.environ.get("SECRET_BOX_KEY"),
+    )
+    pool = create_pool(os.environ["DATABASE_URL"], open_pool=False)
     keys = jwt.PyJWKClient(JWKS_URL)
-    verifier = IdTokenVerifier(os.environ["IDENTITY_PROJECT_ID"], keys.get_signing_key_from_jwt)
+    verifier = IdTokenVerifier(project_id, keys.get_signing_key_from_jwt)
     box = SecretBox(os.environ["SECRET_BOX_KEY"])
-    return create_app(pool, verifier, plaid_client_from_env(), box)
+    raw_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+    origins = [item for item in raw_origins.split(",") if item.strip()]
+    return create_app(pool, verifier, plaid_client_from_env(), box, cors_origins=origins)
