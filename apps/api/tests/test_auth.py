@@ -231,6 +231,34 @@ def test_worker_token_revoked_by_an_admin_is_refused(
     assert client.delete(f"{ADMIN_ACTION}/{issued['id']}", headers=admin).status_code == 404
 
 
+def test_admin_lists_worker_tokens_without_their_secrets(
+    client: TestClient, make_token: MakeToken, migrator_url: str
+) -> None:
+    _set_role(migrator_url, "admin-5", "admin")
+    admin = _bearer(make_token(sub="admin-5"))
+    revoked = client.post(ADMIN_ACTION, headers=admin).json()
+    client.delete(f"{ADMIN_ACTION}/{revoked['id']}", headers=admin)
+    live = client.post(ADMIN_ACTION, headers=admin).json()
+
+    listed = client.get(ADMIN_ACTION, headers=admin)
+
+    assert listed.status_code == 200
+    tokens = {token["id"]: token for token in listed.json()["tokens"]}
+    assert set(tokens[live["id"]]) == {"id", "created_at", "revoked_at"}
+    assert tokens[live["id"]]["revoked_at"] is None
+    assert tokens[revoked["id"]]["revoked_at"] is not None
+    assert live["token"] not in listed.text
+    assert revoked["token"] not in listed.text
+
+
+def test_user_is_refused_the_list_of_worker_tokens(
+    client: TestClient, make_token: MakeToken
+) -> None:
+    response = client.get(ADMIN_ACTION, headers=_bearer(make_token(sub="plain-user")))
+
+    assert response.status_code == 403
+
+
 def test_id_token_is_refused_by_the_worker_api(client: TestClient, make_token: MakeToken) -> None:
     assert client.post("/worker/v1/claim", headers=_bearer(make_token())).status_code == 401
 

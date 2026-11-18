@@ -58,6 +58,23 @@ def create_app(pool: ConnectionPool, verifier: IdTokenVerifier) -> FastAPI:
             )
         return {"id": str(token_id), "token": token}
 
+    @app.get("/v1/admin/worker-tokens", dependencies=[Depends(require_admin)])
+    def list_worker_tokens() -> dict[str, list[dict[str, str | None]]]:
+        with pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, revoked_at FROM worker_tokens ORDER BY created_at DESC, id"
+            ).fetchall()
+        return {
+            "tokens": [
+                {
+                    "id": str(token_id),
+                    "created_at": created_at.isoformat(),
+                    "revoked_at": None if revoked_at is None else revoked_at.isoformat(),
+                }
+                for token_id, created_at, revoked_at in rows
+            ]
+        }
+
     @app.delete(
         "/v1/admin/worker-tokens/{token_id}",
         status_code=status.HTTP_204_NO_CONTENT,

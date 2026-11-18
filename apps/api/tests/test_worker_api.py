@@ -532,6 +532,7 @@ def test_revoked_worker_token_is_refused(api: str, migrator_url: str) -> None:
     ("method", "path"),
     [
         ("GET", "/v1/me"),
+        ("GET", "/v1/admin/worker-tokens"),
         ("POST", "/v1/admin/worker-tokens"),
         ("DELETE", f"/v1/admin/worker-tokens/{uuid4()}"),
     ],
