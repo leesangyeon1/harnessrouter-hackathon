@@ -28,7 +28,7 @@ target-version = "py312"
 select = ["E", "F", "I", "B", "UP", "S", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["finance_api", "finance_core"]
+known-first-party = ["finance_api", "finance_core", "quant_worker"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/tests/**" = ["S101"]
@@ -36,7 +36,7 @@ known-first-party = ["finance_api", "finance_core"]
 [tool.mypy]
 strict = true
 python_version = "3.12"
-files = ["apps/api/src", "apps/api/tests", "packages/finance-core/src"]
+files = ["apps/api/src", "apps/api/tests", "packages/finance-core/src", "packages/quant-worker/src"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib --strict-markers -ra"

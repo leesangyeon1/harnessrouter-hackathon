@@ -1,15 +1,18 @@
 """The API service. Run with: uvicorn finance_api.app:app_from_env --factory"""
 
 import os
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
+from uuid import UUID, uuid4
 
 import jwt
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException, status
 from psycopg_pool import ConnectionPool
 
-from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user
+from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
+from finance_api.worker_api import create_worker_app, hash_token
 
 
 def create_app(pool: ConnectionPool, verifier: IdTokenVerifier) -> FastAPI:
@@ -22,6 +25,7 @@ def create_app(pool: ConnectionPool, verifier: IdTokenVerifier) -> FastAPI:
             pool.close()
 
     # Every route requires a valid ID token. The generated docs routes would not, so there are none.
+    # The worker API is mounted apart, because it takes a worker token and never an ID token.
     app = FastAPI(
         lifespan=lifespan,
         dependencies=[Depends(current_user)],
@@ -39,6 +43,37 @@ def create_app(pool: ConnectionPool, verifier: IdTokenVerifier) -> FastAPI:
     ) -> dict[str, str]:
         return {"user_id": user_id, "role": role}
 
+    @app.post(
+        "/v1/admin/worker-tokens",
+        status_code=status.HTTP_201_CREATED,
+        dependencies=[Depends(require_admin)],
+    )
+    def issue_worker_token() -> dict[str, str]:
+        """A new worker token. This response is the only place it ever appears."""
+        token_id, token = uuid4(), secrets.token_urlsafe(32)
+        with pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO worker_tokens (id, token_hash) VALUES (%s, %s)",
+                (token_id, hash_token(token)),
+            )
+        return {"id": str(token_id), "token": token}
+
+    @app.delete(
+        "/v1/admin/worker-tokens/{token_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        dependencies=[Depends(require_admin)],
+    )
+    def revoke_worker_token(token_id: UUID) -> None:
+        with pool.connection() as conn:
+            revoked = conn.execute(
+                "UPDATE worker_tokens SET revoked_at = now()"
+                " WHERE id = %s AND revoked_at IS NULL RETURNING id",
+                (token_id,),
+            ).fetchone()
+        if revoked is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no live worker token has this id")
+
+    app.mount("/worker/v1", create_worker_app(pool))
     return app
 
 

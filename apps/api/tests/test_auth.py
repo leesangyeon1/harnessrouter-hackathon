@@ -3,22 +3,25 @@
 import time
 from collections.abc import Callable, Iterator
 from typing import Any
+from uuid import uuid4
 
 import jwt
 import psycopg
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from jwt.algorithms import RSAAlgorithm
 from psycopg_pool import ConnectionPool
 
 from finance_api.app import app_from_env, create_app
-from finance_api.auth import IdTokenVerifier, require_admin
+from finance_api.auth import IdTokenVerifier
+from finance_api.worker_api import hash_token
 
 PROJECT = "demo-project"
 KID = "test-kid"
 USER = "user-1"
+ADMIN_ACTION = "/v1/admin/worker-tokens"
 
 MakeToken = Callable[..., str]
 
@@ -49,8 +52,6 @@ def make_token(private_key: rsa.RSAPrivateKey) -> MakeToken:
 
 def _app(api_url: str, signing_key: Callable[[str], jwt.PyJWK]) -> FastAPI:
     app = create_app(ConnectionPool(api_url, open=False), IdTokenVerifier(PROJECT, signing_key))
-    # U10 brings the first admin action; this route stands in for it.
-    app.get("/admin-only", dependencies=[Depends(require_admin)])(lambda: {"ok": True})
     app.get("/declares-no-sign-in")(lambda: {"ok": True})
     return app
 
@@ -161,7 +162,7 @@ def test_unreachable_key_service_is_not_reported_as_a_bad_token(
 
 
 def test_user_is_refused_an_admin_action(client: TestClient, make_token: MakeToken) -> None:
-    response = client.get("/admin-only", headers=_bearer(make_token(sub="plain-user")))
+    response = client.post(ADMIN_ACTION, headers=_bearer(make_token(sub="plain-user")))
 
     assert response.status_code == 403
 
@@ -171,12 +172,12 @@ def test_admin_loses_the_action_when_the_role_is_removed_without_signing_in_agai
 ) -> None:
     token = make_token(sub="admin-1")
     _set_role(migrator_url, "admin-1", "admin")
-    assert client.get("/admin-only", headers=_bearer(token)).status_code == 200
+    assert client.post(ADMIN_ACTION, headers=_bearer(token)).status_code == 201
     assert client.get("/v1/me", headers=_bearer(token)).json()["role"] == "admin"
 
     _set_role(migrator_url, "admin-1", None)
 
-    assert client.get("/admin-only", headers=_bearer(token)).status_code == 403
+    assert client.post(ADMIN_ACTION, headers=_bearer(token)).status_code == 403
     assert client.get("/v1/me", headers=_bearer(token)).json()["role"] == "user"
 
 
@@ -185,9 +186,53 @@ def test_one_users_admin_role_does_not_reach_another_user(
 ) -> None:
     _set_role(migrator_url, "admin-2", "admin")
 
-    response = client.get("/admin-only", headers=_bearer(make_token(sub="someone-else")))
+    response = client.post(ADMIN_ACTION, headers=_bearer(make_token(sub="someone-else")))
 
     assert response.status_code == 403
+
+
+def test_user_is_refused_revoking_a_worker_token(client: TestClient, make_token: MakeToken) -> None:
+    response = client.delete(
+        f"{ADMIN_ACTION}/{uuid4()}", headers=_bearer(make_token(sub="plain-user"))
+    )
+
+    assert response.status_code == 403
+
+
+def test_admin_issues_a_worker_token_that_only_the_worker_api_accepts(
+    client: TestClient, make_token: MakeToken, migrator_url: str
+) -> None:
+    _set_role(migrator_url, "admin-3", "admin")
+
+    issued = client.post(ADMIN_ACTION, headers=_bearer(make_token(sub="admin-3")))
+
+    assert issued.status_code == 201
+    token = issued.json()["token"]
+    assert client.post("/worker/v1/claim", headers=_bearer(token)).status_code in (200, 204)
+    assert client.get("/v1/me", headers=_bearer(token)).status_code == 401
+    with psycopg.connect(migrator_url) as conn:
+        stored = conn.execute(
+            "SELECT token_hash FROM worker_tokens WHERE id = %s", (issued.json()["id"],)
+        ).fetchone()
+    assert stored == (hash_token(token),)
+
+
+def test_worker_token_revoked_by_an_admin_is_refused(
+    client: TestClient, make_token: MakeToken, migrator_url: str
+) -> None:
+    _set_role(migrator_url, "admin-4", "admin")
+    admin = _bearer(make_token(sub="admin-4"))
+    issued = client.post(ADMIN_ACTION, headers=admin).json()
+
+    revoked = client.delete(f"{ADMIN_ACTION}/{issued['id']}", headers=admin)
+
+    assert revoked.status_code == 204
+    assert client.post("/worker/v1/claim", headers=_bearer(issued["token"])).status_code == 401
+    assert client.delete(f"{ADMIN_ACTION}/{issued['id']}", headers=admin).status_code == 404
+
+
+def test_id_token_is_refused_by_the_worker_api(client: TestClient, make_token: MakeToken) -> None:
+    assert client.post("/worker/v1/claim", headers=_bearer(make_token())).status_code == 401
 
 
 def test_service_built_from_the_environment_verifies_tokens(

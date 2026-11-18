@@ -10,7 +10,8 @@ one of two modes. Sandbox and paper data only.
 | Path | What |
 | --- | --- |
 | `apps/api` | `finance_api`: the FastAPI service and the SQL migrations |
-| `packages/*` | Libraries, each a uv workspace member |
+| `packages/finance-core` | `finance_core`: the models, backtest, selectors, screen, reports and sizing. No I/O |
+| `packages/quant-worker` | `quant_worker`: the loop that runs on the owner's nodes |
 
 ## The gate
 
@@ -33,6 +34,20 @@ DATABASE_URL=<migration role's URL> uv run --all-packages python -m finance_api.
 DATABASE_URL=<API role's URL> IDENTITY_PROJECT_ID=<project id> \
   uv run --all-packages uvicorn finance_api.app:app_from_env --factory
 ```
+
+## Running a worker on a node
+
+An admin issues a token with `POST /v1/admin/worker-tokens`; the response is the only place the
+token appears. The node needs that token and the API's address, and nothing else:
+
+```sh
+WORKER_API_URL=https://<api host> WORKER_TOKEN=<token> uv run --all-packages quant-worker
+```
+
+The worker claims a unit, reads its bars, runs every model and both selectors, and uploads the
+result. It makes outbound requests only.
+
+## Database roles
 
 The migrations create the roles `finance_api`, `finance_cycle` and `finance_executor` without a
 login. The role that runs them owns every table and needs `CREATEROLE`. The API's login user is
