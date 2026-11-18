@@ -1,6 +1,6 @@
 # Deterministic finance core
 
-Python 3.11+ package for the reviewed Finance Platform plan, with no runtime
+Python 3.12+ package for the reviewed Finance Platform plan, with no runtime
 dependencies or network clients. All figures are computed from supplied records.
 This package never submits orders or reads credentials.
 
@@ -14,6 +14,16 @@ uvx ruff format --check packages/finance-core
 cd packages/finance-core
 uvx mypy --config-file pyproject.toml
 uv build
+```
+
+The application root owns the combined workspace gate. After installing all
+workspace members, its pytest command also collects this package's unittest tests:
+
+```sh
+uv run --all-packages pytest packages/finance-core/tests -q
+uv run --all-packages ruff check packages/finance-core
+uv run --all-packages ruff format --check packages/finance-core
+uv run --all-packages mypy --strict packages/finance-core/src
 ```
 
 ## Integration contracts
