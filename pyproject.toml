@@ -36,11 +36,11 @@ known-first-party = ["finance_api", "finance_core"]
 [tool.mypy]
 strict = true
 python_version = "3.12"
-files = ["apps/api/src", "apps/api/tests"]
+files = ["apps/api/src", "apps/api/tests", "packages/finance-core/src"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib --strict-markers -ra"
-testpaths = ["apps"]
+testpaths = ["apps", "packages"]
 filterwarnings = [
     "error",
     # Starlette's test client asks for httpx2 in place of httpx. Tests only; nothing ships with it.
