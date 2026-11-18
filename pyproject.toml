@@ -1,0 +1,48 @@
+[project]
+name = "harnessrouter-hackathon"
+version = "0.0.0"
+description = "Finance platform MVP: Plaid Sandbox, Alpaca paper trading, owner CPU nodes, two modes"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["apps/api", "packages/*"]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.27",
+    "mypy>=1.13",
+    "pgserver>=0.1.4",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["finance_api", "finance_core", "quant_worker"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["apps/api/src", "apps/api/tests", "packages/finance-core/src", "packages/quant-worker/src"]
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib --strict-markers -ra"
+testpaths = ["apps", "packages"]
+filterwarnings = [
+    "error",
+    # Starlette's test client asks for httpx2 in place of httpx. Tests only; nothing ships with it.
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

@@ -1,0 +1,19 @@
+[project]
+name = "quant-worker"
+version = "0.1.0"
+description = "Runs on the owner's nodes: claims a unit, runs every model and both selectors, uploads"
+requires-python = ">=3.12"
+dependencies = ["harnessrouter-finance-core"]
+
+[project.scripts]
+quant-worker = "quant_worker:main"
+
+[tool.uv.sources]
+harnessrouter-finance-core = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quant_worker"]
