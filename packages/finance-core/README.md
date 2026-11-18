@@ -68,6 +68,19 @@ uv run --all-packages mypy --strict packages/finance-core/src
   fully amortizing monthly schedule and exclude closing fees. `readable_types`
   must contain only loan types the U0 probe actually proved readable. Report
   schemas contain own labels and computed figures, no provider identifiers.
+  `Card.balance` and `Card.minimum_payment` accept `Decimal | None`, and output
+  preserves signed balances and unknown values. Only a positive known balance
+  with known purchase APR receives a contiguous `paydown_rank`. Zero, negative,
+  unknown-balance and unknown-APR cards remain in the report with rank `None`;
+  all supplied owned cards remain eligible for the supplied rewards table.
+  An unknown minimum is distinct from a known `Decimal(0)` and is never used to
+  infer that an account is paid off. A negative credit balance means the lender
+  owes the holder, without identifying the cause. These semantics follow the
+  [Accounts API balance fields](https://plaid.com/docs/api/accounts/) and
+  [Liabilities API credit fields](https://plaid.com/docs/api/products/liabilities/),
+  verified by Research expert on 2026-11-18. Actual Sandbox signed/null readback
+  through ingestion and persistence still needs U0 evidence. Card labels and
+  their match to owned rewards rows remain the caller's explicit input contract.
 - `sizing.wanted_values` returns row-1 wanted values; `sell_targets` fits them
   around frozen holdings before sells. `targets` computes post-buy values from
   **fresh holdings after sells**, counting every holding against the budget.

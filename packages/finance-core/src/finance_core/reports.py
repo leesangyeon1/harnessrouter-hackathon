@@ -13,9 +13,9 @@ CENT = Decimal(".01")
 
 class CardRow(TypedDict):
     label: str
-    balance: Decimal
+    balance: Decimal | None
     purchase_apr: Decimal | None
-    minimum_payment: Decimal
+    minimum_payment: Decimal | None
     paydown_rank: int | None
 
 
@@ -55,9 +55,9 @@ class Transaction:
 @dataclass(frozen=True)
 class Card:
     label: str
-    balance: Decimal
+    balance: Decimal | None
     purchase_apr: Decimal | None
-    minimum_payment: Decimal
+    minimum_payment: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -85,32 +85,39 @@ def spending(transactions: Sequence[Transaction]) -> list[dict[str, str | Decima
     ]
 
 
+def _rankable_debt(card: Card) -> bool:
+    return card.balance is not None and card.balance > 0 and card.purchase_apr is not None
+
+
 def card_report(cards: Sequence[Card], rewards: Mapping[str, Mapping[str, Decimal]]) -> CardReport:
-    """APRs are percentages. Rewards are owned, dated table inputs, not Plaid fields."""
+    """Preserve signed/unknown figures; rank only positive known debt with known APR.
+
+    APRs are percentages. Rewards are owned, dated table inputs, not Plaid fields.
+    A negative credit balance means the lender owes the holder; it does not prove
+    why the credit exists. An unknown minimum payment is not a zero payment.
+    """
     if len({c.label for c in cards}) != len(cards):
         raise ValueError("card labels must be unique")
     for card in cards:
         if (
-            not card.balance.is_finite()
-            or not card.minimum_payment.is_finite()
-            or card.balance < 0
-            or card.minimum_payment < 0
-            or (
-                card.purchase_apr is not None
-                and (not card.purchase_apr.is_finite() or card.purchase_apr < 0)
+            any(
+                value is not None and not value.is_finite()
+                for value in (card.balance, card.minimum_payment, card.purchase_apr)
             )
+            or (card.minimum_payment is not None and card.minimum_payment < 0)
+            or (card.purchase_apr is not None and card.purchase_apr < 0)
         ):
             raise ValueError("invalid card figures")
     ordered = sorted(
-        cards, key=lambda c: (c.purchase_apr is None, -(c.purchase_apr or Decimal(0)), c.label)
+        cards, key=lambda c: (not _rankable_debt(c), -(c.purchase_apr or Decimal(0)), c.label)
     )
     paydown: list[CardRow] = [
         {
             "label": c.label,
-            "balance": _money(c.balance),
+            "balance": None if c.balance is None else _money(c.balance),
             "purchase_apr": c.purchase_apr,
-            "minimum_payment": _money(c.minimum_payment),
-            "paydown_rank": i + 1 if c.purchase_apr is not None else None,
+            "minimum_payment": None if c.minimum_payment is None else _money(c.minimum_payment),
+            "paydown_rank": i + 1 if _rankable_debt(c) else None,
         }
         for i, c in enumerate(ordered)
     ]

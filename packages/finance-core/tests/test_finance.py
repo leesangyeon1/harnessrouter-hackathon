@@ -118,6 +118,51 @@ class ScreenTests(unittest.TestCase):
 
 
 class ReportTests(unittest.TestCase):
+    def test_credit_balance_is_preserved_and_has_no_paydown_rank(self):
+        report = card_report(
+            [Card("Credit", D("-25.23"), D(30), D(0))], {"FOOD": {"Credit": D(".03")}}
+        )
+        row = report["paydown"][0]
+        self.assertEqual(row["balance"], D("-25.23"))
+        self.assertIsNone(row["paydown_rank"])
+        self.assertEqual(report["best_card_by_category"], {"FOOD": "Credit"})
+
+    def test_unknown_minimum_is_preserved_separately_from_zero(self):
+        report = card_report(
+            [Card("Unknown", D(100), D(20), None), Card("Zero", D(100), D(10), D(0))], {}
+        )
+        self.assertIsNone(report["paydown"][0]["minimum_payment"])
+        self.assertEqual(report["paydown"][1]["minimum_payment"], D("0.00"))
+        self.assertEqual([row["paydown_rank"] for row in report["paydown"]], [1, 2])
+
+    def test_only_positive_known_debts_receive_contiguous_paydown_ranks(self):
+        cards = [
+            Card("Zero balance", D(0), D(99), D(0)),
+            Card("Credit balance", D(-10), D(80), None),
+            Card("Unknown balance", None, D(60), None),
+            Card("Lower APR debt", D(200), D(10), D(5)),
+            Card("Higher APR debt", D(100), D(20), D(10)),
+            Card("Unknown APR", D(100), None, None),
+        ]
+        report = card_report(cards, {})
+        rows = {row["label"]: row for row in report["paydown"]}
+        self.assertEqual(rows["Higher APR debt"]["paydown_rank"], 1)
+        self.assertEqual(rows["Lower APR debt"]["paydown_rank"], 2)
+        for label in ("Zero balance", "Credit balance", "Unknown balance", "Unknown APR"):
+            self.assertIsNone(rows[label]["paydown_rank"])
+        self.assertIsNone(rows["Unknown balance"]["balance"])
+        self.assertEqual(len(report["paydown"]), len(cards))
+
+    def test_invalid_card_values_remain_rejected(self):
+        for card in (
+            Card("A", D("NaN"), D(10), None),
+            Card("A", D(100), D(-1), None),
+            Card("A", D(100), None, D(-1)),
+            Card("A", None, None, D("Infinity")),
+        ):
+            with self.subTest(card=card), self.assertRaises(ValueError):
+                card_report([card], {})
+
     def test_spending_and_unknown_categories(self):
         txs = [
             Transaction("2024-01-01", D("10.10"), "FOOD"),
