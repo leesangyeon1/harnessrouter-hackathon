@@ -10,6 +10,8 @@ from finance_core.quant import (
     Bar,
     Metrics,
     ModelResult,
+    ModePolicy,
+    TradeCosts,
     account_step,
     backtest,
     evaluate,
@@ -195,6 +197,54 @@ class QuantTests(unittest.TestCase):
         ):
             with self.assertRaises(ValueError):
                 select_winner([base, replace(bad, model_id="M02")], "stable")
+
+    def test_pinned_policy_and_costs_are_inputs(self):
+        policy = ModePolicy(version=2, stable_max_drawdown=0.3, confirmation_bars=20)
+        costs = TradeCosts(stock=0.005, bond=0.006, crypto=0.007)
+        results = evaluate(series(), policy=policy, costs=costs)
+        self.assertTrue(all(r.policy_version == 2 and r.cost_per_side == 0.005 for r in results))
+        self.assertTrue(
+            all(r.policy_hash == policy.digest and r.costs_hash == costs.digest for r in results)
+        )
+        # A 25% drawdown is allowed by this cycle's policy, independent of default v1.
+        winner = replace(
+            results[1], selection=Metrics(0.2, 2, 0.25), confirmation=Metrics(0.1, 1, 0.1)
+        )
+        self.assertEqual(select_winner([winner], "stable", policy=policy, costs=costs), winner)
+        with self.assertRaises(ValueError):
+            select_winner([winner], "stable")
+        with self.assertRaises(ValueError):
+            evaluate(series(), policy_version=1, policy=policy)
+        expected = backtest(series(), "M01", 0.005)
+        self.assertEqual(results[1].selection, metrics(expected.daily_returns[:-20]))
+        self.assertEqual(results[1].confirmation, metrics(expected.daily_returns[-20:]))
+
+    def test_same_version_with_changed_values_or_costs_is_refused(self):
+        bars = series()
+        base = evaluate(bars)
+        changed_policy = evaluate(bars, policy=ModePolicy(stable_max_drawdown=0.3))
+        changed_cost = evaluate(bars, costs=TradeCosts(stock=0.002))
+        for changed in (changed_policy, changed_cost):
+            with self.assertRaises(ValueError):
+                select_winner([base[1], changed[2]], "stable")
+        with self.assertRaises(ValueError):
+            select_winner([replace(base[1], cost_per_side=0.009)], "stable")
+
+    def test_invalid_pinned_settings_are_refused(self):
+        for settings in (
+            {"version": 0},
+            {"version": True},
+            {"stable_max_drawdown": float("nan")},
+            {"stable_deploy": 2},
+            {"confirmation_bars": 0},
+        ):
+            with self.assertRaises(ValueError):
+                ModePolicy(**settings)
+        for cost in (-0.001, 1, float("inf")):
+            with self.assertRaises(ValueError):
+                TradeCosts(stock=cost)
+        with self.assertRaises(ValueError):
+            evaluate(series(), policy=ModePolicy(confirmation_bars=250))
 
     def test_evaluation_is_reproducible_and_requires_250_bars(self):
         bars = series()

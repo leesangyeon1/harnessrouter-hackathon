@@ -19,6 +19,92 @@ MODEL_SET_VERSION = "daily-v1"
 MODEL_IDS = ("M00", "M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M10", "M11")
 
 
+def _fraction(value: float) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or not 0 <= value <= 1
+    ):
+        raise ValueError("setting must be a finite fraction between zero and one")
+    return float(value)
+
+
+@dataclass(frozen=True)
+class ModePolicy:
+    """Immutable JSON-compatible snapshot from the cycle's mode_policies row."""
+
+    version: int = 1
+    stable_max_drawdown: float = 0.2
+    stable_deploy: float = 0.5
+    stable_ticker_cap: float = 0.2
+    aggressive_deploy: float = 1.0
+    aggressive_ticker_cap: float = 1.0
+    confirmation_bars: int = 60
+
+    def __post_init__(self) -> None:
+        if type(self.version) is not int or self.version < 1:
+            raise ValueError("policy version must be a positive integer")
+        if type(self.confirmation_bars) is not int or self.confirmation_bars < 1:
+            raise ValueError("confirmation window must be a positive integer")
+        for field in (
+            "stable_max_drawdown",
+            "stable_deploy",
+            "stable_ticker_cap",
+            "aggressive_deploy",
+            "aggressive_ticker_cap",
+        ):
+            object.__setattr__(self, field, _fraction(getattr(self, field)))
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                asdict(self), sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+        ).hexdigest()
+
+    def allocation(self, mode: str) -> tuple[float, float]:
+        if mode == "stable":
+            return self.stable_deploy, self.stable_ticker_cap
+        if mode == "aggressive":
+            return self.aggressive_deploy, self.aggressive_ticker_cap
+        raise ValueError("unknown mode")
+
+
+@dataclass(frozen=True)
+class TradeCosts:
+    """Per-side fractional costs pinned in the cycle, independently of policy."""
+
+    stock: float = 0.001
+    bond: float = 0.001
+    crypto: float = 0.0025
+
+    def __post_init__(self) -> None:
+        for field in ("stock", "bond", "crypto"):
+            value = _fraction(getattr(self, field))
+            if value == 1:
+                raise ValueError("cost must be less than one")
+            object.__setattr__(self, field, value)
+
+    @property
+    def digest(self) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                asdict(self), sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+        ).hexdigest()
+
+    def for_sector(self, sector: str) -> float:
+        if sector not in ("stock", "bond", "crypto"):
+            raise ValueError("unknown sector")
+        return {"stock": self.stock, "bond": self.bond, "crypto": self.crypto}[sector]
+
+
+DEFAULT_POLICY = ModePolicy()
+DEFAULT_COSTS = TradeCosts()
+
+
 @dataclass(frozen=True)
 class Bar:
     date: str
@@ -64,6 +150,10 @@ class ModelResult:
     selection: Metrics
     confirmation: Metrics
     next_position: float
+    policy_hash: str = DEFAULT_POLICY.digest
+    costs_hash: str = DEFAULT_COSTS.digest
+    sector: str = "stock"
+    cost_per_side: float = DEFAULT_COSTS.stock
 
 
 def _validate_bars(bars: Sequence[Bar]) -> None:
@@ -216,16 +306,25 @@ def bars_digest(bars: Sequence[Bar]) -> str:
 
 
 def evaluate(
-    bars: Sequence[Bar], *, sector: str = "stock", policy_version: int = 1
+    bars: Sequence[Bar],
+    *,
+    sector: str = "stock",
+    policy_version: int | None = None,
+    policy: ModePolicy = DEFAULT_POLICY,
+    costs: TradeCosts = DEFAULT_COSTS,
 ) -> list[ModelResult]:
     _validate_bars(bars)
     if len(bars) < 250:
         raise ValueError("at least 250 bars required")
-    if sector not in ("stock", "bond", "crypto") or policy_version != 1:
-        raise ValueError("unknown sector or policy version")
+    if policy_version is not None and (
+        type(policy_version) is not int or policy_version != policy.version
+    ):
+        raise ValueError("policy version differs from pinned policy data")
     bars = bars[-500:]
+    if policy.confirmation_bars >= len(bars) - 61:
+        raise ValueError("confirmation window leaves no selection returns")
     digest = bars_digest(bars)
-    cost = 0.0025 if sector == "crypto" else 0.001
+    cost = costs.for_sector(sector)
     results = []
     for model_id in MODEL_IDS:
         result = backtest(bars, model_id, cost)
@@ -234,22 +333,48 @@ def evaluate(
             ModelResult(
                 model_id,
                 MODEL_SET_VERSION,
-                policy_version,
+                policy.version,
                 digest,
-                metrics(result.daily_returns[:-60]),
-                metrics(result.daily_returns[-60:]),
+                metrics(result.daily_returns[: -policy.confirmation_bars]),
+                metrics(result.daily_returns[-policy.confirmation_bars :]),
                 next_position,
+                policy.digest,
+                costs.digest,
+                sector,
+                cost,
             )
         )
     return results
 
 
-def select_winner(results: Sequence[ModelResult], mode: str) -> ModelResult | None:
+def select_winner(
+    results: Sequence[ModelResult],
+    mode: str,
+    *,
+    policy: ModePolicy = DEFAULT_POLICY,
+    costs: TradeCosts = DEFAULT_COSTS,
+) -> ModelResult | None:
     if mode not in ("stable", "aggressive"):
         raise ValueError("unknown mode")
-    identities = {(r.model_set_version, r.policy_version, r.bars_hash) for r in results}
+    identities = {
+        (
+            r.model_set_version,
+            r.policy_version,
+            r.bars_hash,
+            r.policy_hash,
+            r.costs_hash,
+            r.sector,
+            r.cost_per_side,
+        )
+        for r in results
+    }
     if len(identities) > 1 or any(
-        r.model_set_version != MODEL_SET_VERSION or r.policy_version != 1 for r in results
+        r.model_set_version != MODEL_SET_VERSION
+        or r.policy_version != policy.version
+        or r.policy_hash != policy.digest
+        or r.costs_hash != costs.digest
+        or r.cost_per_side != costs.for_sector(r.sector)
+        for r in results
     ):
         raise ValueError("results must share pinned versions and bars")
     if len({r.model_id for r in results}) != len(results) or any(
@@ -270,7 +395,10 @@ def select_winner(results: Sequence[ModelResult], mode: str) -> ModelResult | No
         if r.model_id != "M00"
         and (
             mode == "aggressive"
-            or (r.selection.sharpe is not None and r.selection.max_drawdown <= 0.2)
+            or (
+                r.selection.sharpe is not None
+                and r.selection.max_drawdown <= policy.stable_max_drawdown
+            )
         )
     ]
     if not eligible:

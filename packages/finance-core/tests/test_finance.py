@@ -3,7 +3,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal as D
 
-from finance_core.quant import Bar
+from finance_core.quant import Bar, ModePolicy
 from finance_core.reports import Card, Loan, Transaction, card_report, refinance, spending
 from finance_core.screening import Asset, screen
 from finance_core.sizing import sell_targets, targets
@@ -169,6 +169,25 @@ class ReportTests(unittest.TestCase):
 
 
 class SizingTests(unittest.TestCase):
+    def test_cycle_policy_sizes_both_sell_and_buy_plans(self):
+        policy = ModePolicy(
+            version=2,
+            stable_deploy=0.6,
+            stable_ticker_cap=0.3,
+            aggressive_deploy=0.8,
+            aggressive_ticker_cap=0.4,
+        )
+        self.assertEqual(targets(D(1000), "stable", {"A": 1}, policy=policy), {"A": D(300)})
+        self.assertEqual(
+            targets(D(1000), "stable", {"A": 1}, policy=policy, held_after_sells=D(500)),
+            {"A": D(100)},
+        )
+        self.assertEqual(
+            sell_targets(D(1000), "stable", {"A": 1}, frozen_value=D(500), policy=policy),
+            {"A": D(100)},
+        )
+        self.assertEqual(targets(D(1000), "aggressive", {"A": 1}, policy=policy), {"A": D(400)})
+
     def test_sell_targets_fit_around_frozen_holdings(self):
         self.assertEqual(
             sell_targets(D(1000), "stable", {"A": 1}, frozen_value=D(800)), {"A": D(0)}
