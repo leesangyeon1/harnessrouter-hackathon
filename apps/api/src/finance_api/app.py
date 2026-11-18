@@ -12,7 +12,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
-from finance_api import plaid_ingest
+from finance_api import plaid_ingest, reports
 from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
 from finance_api.plaid import PlaidClient, PlaidError, plaid_client_from_env
 from finance_api.sealing import SecretBox
@@ -44,6 +44,7 @@ def create_app(
     app.state.plaid = plaid
     app.state.box = box
     app.include_router(plaid_ingest.router)
+    app.include_router(reports.router)
 
     @app.exception_handler(PlaidError)
     def plaid_refused(_: Request, error: PlaidError) -> JSONResponse:
