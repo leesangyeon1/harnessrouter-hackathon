@@ -26,6 +26,7 @@ import {
 import { adminAuth, configured } from "@/lib/firebase";
 import { sessionRequest } from "@/lib/session";
 import { PerformanceLog } from "./performance-log";
+import { AdminQuantEmulator } from "./quant-emulator";
 const operationRequest = (path: string, init: RequestInit = {}) =>
   sessionRequest(path, init, async () => {
     if (!configured()) return null;
@@ -34,7 +35,7 @@ const operationRequest = (path: string, init: RequestInit = {}) =>
     return auth.currentUser ? auth.currentUser.getIdToken() : null;
   });
 type Token = { id: string; created_at: string; revoked_at: string | null };
-type Section = "workers" | "performance" | "cycles" | "policies" | "usage";
+type Section = "workers" | "emulator" | "performance" | "cycles" | "policies" | "usage";
 const stamp = (value: string) =>
   `${new Date(value).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
@@ -167,6 +168,7 @@ export function Operations({
             [
               { id: "workers", label: "Worker credentials", icon: KeyRound },
               { id: "performance", label: "Performance log", icon: BarChart3 },
+              { id: "emulator", label: "Quant emulator", icon: Activity },
               { id: "cycles", label: "Evaluation cycles", icon: Activity },
               { id: "policies", label: "Mode policies", icon: Layers },
               { id: "usage", label: "Usage & issues", icon: Database },
@@ -210,6 +212,7 @@ export function Operations({
                 {
                   workers: "Worker credentials",
                   performance: "Performance log",
+                  emulator: "Quant emulator",
                   cycles: "Evaluation cycles",
                   policies: "Mode policies",
                   usage: "Usage & issues",
@@ -440,6 +443,8 @@ export function Operations({
                 revoked token cannot continue claiming or uploading work.
               </p>
             </>
+          ) : section === "emulator" ? (
+            <AdminQuantEmulator request={operationRequest} />
           ) : section === "performance" || section === "cycles" ? (
             <PerformanceLog
               request={operationRequest}

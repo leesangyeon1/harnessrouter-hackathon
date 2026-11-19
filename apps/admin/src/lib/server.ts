@@ -1,5 +1,6 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { proxyQuant } from "./quant-proxy";
 import {
   AdminGateError,
   checkAdmin,
@@ -18,6 +19,27 @@ export async function verifiedSession() {
   const token = (await cookies()).get(cookieName)?.value;
   const profile = await checkAdmin(token, apiBase());
   return { token: token!, profile };
+}
+export async function quantEmulatorRequest(
+  request: Request,
+  target: "bundle" | "tasks" | "detail",
+  id?: string,
+) {
+  try {
+    const { answer, status } = await proxyQuant(
+      request,
+      target,
+      {
+        base: apiBase(),
+        origin: adminOrigin(request),
+        session: verifiedSession,
+      },
+      id,
+    );
+    return json(answer, status);
+  } catch (error) {
+    return failure(error);
+  }
 }
 export const json = (value: unknown, status = 200) =>
   Response.json(value, {
