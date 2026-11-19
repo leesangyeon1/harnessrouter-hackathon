@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -74,6 +75,7 @@ import {
 import { authConfigured, identityAuth } from "@/lib/firebase";
 import { CycleDiscovery } from "./cycle-discovery";
 import { SyncNotice } from "./sync-notice";
+import { TickerVerifier } from "./ticker-verifier";
 
 type View =
   | "overview"
@@ -82,6 +84,7 @@ type View =
   | "cards"
   | "investing"
   | "discovery"
+  | "verifier"
   | "settings";
 type Dialog =
   "connect" | "auth" | "search" | "notifications" | "help" | "mode" | null;
@@ -102,6 +105,7 @@ const navigation: {
     section: "GROW YOUR MONEY",
   },
   { id: "discovery", label: "Market discovery", icon: Compass },
+  { id: "verifier", label: "Ticker verifier", icon: Sparkles },
 ];
 const titles: Record<View, string> = {
   overview: "Your money, in view.",
@@ -110,6 +114,7 @@ const titles: Record<View, string> = {
   cards: "A clearer picture of credit.",
   investing: "A little room to explore.",
   discovery: "Look a little closer.",
+  verifier: "Verify before you move.",
   settings: "Make yourself at home.",
 };
 
@@ -384,6 +389,10 @@ export function FinanceApp() {
   );
   const loadCycle = useCallback(
     async () => (user ? client(user).latestCycle() : null),
+    [client, user],
+  );
+  const verifierApi = useMemo(
+    () => (user ? client(user) : null),
     [client, user],
   );
 
@@ -788,22 +797,30 @@ export function FinanceApp() {
                           ? "Explore quantitative strategies with paper money."
                           : view === "discovery"
                             ? "A focused view of stocks, bond ETFs, and crypto."
-                            : "Your profile, connections, and workspace preferences."}
+                            : view === "verifier"
+                              ? "Identify and verify listed securities, bond ETFs, and crypto USD pairs from public sources."
+                              : "Your profile, connections, and workspace preferences."}
               </p>
             </div>
             <div className="heading-actions">
-              {view === "discovery" ? (
+              {view === "discovery" || view === "verifier" ? (
                 demo ? (
                   <button
                     className="button primary"
                     key="cycle-signin"
                     onClick={() => setDialog("auth")}
                   >
-                    Sign in for latest cycle
+                    {view === "verifier"
+                      ? "Sign in to verify"
+                      : "Sign in for latest cycle"}
                     <ArrowRight size={15} />
                   </button>
                 ) : (
-                  <span className="pill neutral-pill">Read-only screen</span>
+                  <span className="pill neutral-pill">
+                    {view === "verifier"
+                      ? "Read-only public lookup"
+                      : "Read-only screen"}
+                  </span>
                 )
               ) : (
                 <>
@@ -1860,6 +1877,14 @@ export function FinanceApp() {
                   : "Published selections are screening results, not model-performance winners."}
               </p>
             </>
+          )}
+
+          {view === "verifier" && (
+            <TickerVerifier
+              api={verifierApi}
+              demo={demo}
+              onRequireSignIn={() => setDialog("auth")}
+            />
           )}
 
           {view === "settings" && (

@@ -18,7 +18,9 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict
 
+from finance_api.agent_search import execute_worker_harness_task
 from finance_api.db import create_pool, tenant_transaction
+from finance_api.harnessrouter_adapter import HarnessRouter, load_api_key
 from finance_api.health import create_health_app
 from finance_api.internal_auth import (
     GOOGLE_OIDC_JWKS_URL,
@@ -164,6 +166,7 @@ def worker_app_from_env() -> FastAPI:
     configure_cloud_logging()
     register_secret_for_redaction(
         os.environ.get("DATABASE_URL"),
+        os.environ.get("HR_API_KEY"),
         os.environ.get("HARNESSROUTER_API_KEY"),
         os.environ.get("TOKENROUTER_API_KEY"),
         os.environ.get("SECRET_BOX_KEY"),
@@ -176,4 +179,17 @@ def worker_app_from_env() -> FastAPI:
         allowed_emails=allowed_sas,
         signing_key=keys.get_signing_key_from_jwt,
     )
-    return create_task_worker_app(pool, verifier)
+    try:
+        hr_key = load_api_key()
+        hr_client = HarnessRouter(api_key=hr_key)
+
+        def live_runner(
+            db_pool: ConnectionPool, payload: TaskDispatchPayload, meta: dict[str, Any]
+        ) -> str:
+            return execute_worker_harness_task(
+                db_pool, hr_client, payload.user_id, payload.task_id, meta
+            )
+
+        return create_task_worker_app(pool, verifier, runner=live_runner)
+    except ValueError:
+        return create_task_worker_app(pool, verifier)

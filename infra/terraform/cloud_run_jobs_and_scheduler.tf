@@ -321,6 +321,15 @@ resource "google_cloud_run_v2_job" "agent_task" {
           }
         }
         env {
+          name = "HR_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed["harnessrouter_api_key"].secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
           name = "HARNESSROUTER_API_KEY"
           value_source {
             secret_key_ref {

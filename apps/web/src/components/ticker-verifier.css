@@ -1,0 +1,211 @@
+.ticker-verifier {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.verifier-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.verifier-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.verifier-form input {
+  flex: 1 1 320px;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid #d7dde1;
+  background: #fff;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+.verifier-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.verifier-chip {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #fbfcfc;
+  color: #3d4b52;
+  font-size: 11.5px;
+  font-weight: 550;
+}
+.verifier-chip:hover {
+  border-color: #cbd5db;
+  background: #f2f5f7;
+}
+.verifier-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid #f0c9bd;
+  background: var(--peach);
+}
+.verifier-progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.verifier-progress-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: #8f3c2b;
+}
+.verifier-stream-preview {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #ffffffc8;
+  border: 1px solid #eed6cd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #463b38;
+}
+.verifier-clarification {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #fff6ed;
+  border: 1px solid #f0cfa8;
+  color: #6f4616;
+  font-size: 13px;
+}
+.verifier-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 14px;
+  margin-top: 12px;
+}
+.verifier-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 16px;
+  background: #fcfdfd;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.verifier-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.verifier-symbol {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.verifier-meta-dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f4f6f8;
+  font-size: 12px;
+}
+.verifier-meta-dl dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: #556168;
+}
+.verifier-meta-dl dd {
+  margin: 2px 0 0;
+  font-weight: 600;
+  color: var(--ink);
+  word-break: break-word;
+}
+.verifier-citations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.verifier-citation-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.verifier-citation-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #245b7a;
+  font-weight: 600;
+  word-break: break-all;
+}
+.verifier-citation-link:hover {
+  text-decoration: underline;
+}
+.verifier-facts {
+  margin: 5px 0 0;
+  padding-left: 18px;
+  color: #465259;
+}
+.verifier-files {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.verifier-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fbfcfc;
+}
+.verifier-iframe {
+  width: 100%;
+  min-height: 340px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.verifier-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.verifier-history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fbfcfc;
+}
+.verifier-history-item.selected {
+  border-color: var(--coral);
+  background: var(--peach);
+}
+@media (max-width: 640px) {
+  .verifier-results-grid {
+    grid-template-columns: 1fr;
+  }
+}

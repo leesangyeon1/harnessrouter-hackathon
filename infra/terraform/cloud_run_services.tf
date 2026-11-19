@@ -99,6 +99,15 @@ resource "google_cloud_run_v2_service" "worker" {
         }
       }
       env {
+        name = "HR_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed["harnessrouter_api_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
         name = "HARNESSROUTER_API_KEY"
         value_source {
           secret_key_ref {
@@ -167,7 +176,7 @@ resource "google_cloud_run_v2_service" "api" {
   template {
     service_account                  = google_service_account.api.email
     max_instance_request_concurrency = var.api_concurrency
-    timeout                          = "60s"
+    timeout                          = "600s"
 
     scaling {
       min_instance_count = var.api_min_instances
@@ -189,7 +198,7 @@ resource "google_cloud_run_v2_service" "api" {
           cpu    = var.api_cpu
           memory = var.api_memory
         }
-        cpu_idle          = true
+        cpu_idle          = false
         startup_cpu_boost = true
       }
 
@@ -307,6 +316,15 @@ resource "google_cloud_run_v2_service" "api" {
         value_source {
           secret_key_ref {
             secret  = google_secret_manager_secret.managed["plaid_secret"].secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "HR_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed["harnessrouter_api_key"].secret_id
             version = "latest"
           }
         }

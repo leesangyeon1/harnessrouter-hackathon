@@ -103,7 +103,7 @@ jobs:
         run: |
           ./deploy/scripts/verify_bundle_secrets.sh --repo apps/api/src apps/web/src apps/admin/src packages infra deploy/docker
           docker build -f apps/api/Dockerfile -t finance-api:${GITHUB_SHA} .
-          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.secret_console, finance_api.task_worker, finance_api.migrate, finance_api.bootstrap_roles, finance_api.jobs, finance_api.market_ingest"
+          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.secret_console, finance_api.admin_performance, finance_api.harnessrouter_adapter, finance_api.agent_search, finance_api.task_worker, finance_api.migrate, finance_api.bootstrap_roles, finance_api.jobs, finance_api.market_ingest"
 
           docker build -f apps/web/Dockerfile \
             --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.placeholder.invalid \
@@ -454,6 +454,12 @@ jobs:
 
           API_PERF_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/admin/quant-performance")"
           test "${API_PERF_UNAUTH}" = "401"
+
+          AGENT_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API_URL}/v1/agent-tasks")"
+          test "${AGENT_UNAUTH}" = "401"
+
+          PREVIEW_INVALID="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/agent-preview/bad.0.bad/index.html")"
+          test "${PREVIEW_INVALID}" = "404"
 
           API_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/me")"
           test "${API_UNAUTH}" = "401"

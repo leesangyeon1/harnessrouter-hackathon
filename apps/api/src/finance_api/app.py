@@ -15,9 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
-from finance_api import admin_performance, cycles, plaid_ingest, reports
+from finance_api import admin_performance, agent_search, cycles, plaid_ingest, reports
 from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
 from finance_api.db import create_pool
+from finance_api.harnessrouter_adapter import HarnessRouter, load_api_key, preview_secret
 from finance_api.health import create_health_app
 from finance_api.observability import (
     CorrelationMiddleware,
@@ -56,6 +57,8 @@ def create_app(
     *,
     cors_origins: Sequence[str] = (),
     secret_console: FastAPI | None = None,
+    harness_router: HarnessRouter | None = None,
+    preview_signing_key: bytes | None = None,
 ) -> FastAPI:
     allowed_origins = _validate_cors_origins(cors_origins)
 
@@ -80,14 +83,22 @@ def create_app(
     app.state.verifier = verifier
     app.state.plaid = plaid
     app.state.box = box
+    app.state.harness_router = harness_router
+    p_key = preview_signing_key or preview_secret()
+    app.state.preview_signing_key = p_key
 
     def _swap_plaid(new_client_id: str, new_secret: str) -> None:
         app.state.plaid = PlaidClient(new_client_id, new_secret, httpx.Client(timeout=30))
+
+    def _swap_hr(new_hr_key: str) -> None:
+        register_secret_for_redaction(new_hr_key)
+        app.state.harness_router = HarnessRouter(api_key=new_hr_key)
 
     console_app = secret_console or build_default_secret_console(
         verifier.project_id,
         verifier.signing_key,
         on_plaid_credentials_updated=_swap_plaid,
+        on_harnessrouter_key_updated=_swap_hr,
     )
     app.add_middleware(RootPortalMiddleware, console_app=console_app)
     app.add_middleware(CorrelationMiddleware)
@@ -104,6 +115,7 @@ def create_app(
     app.include_router(reports.router)
     app.include_router(cycles.router)
     app.include_router(admin_performance.router)
+    app.include_router(agent_search.router)
 
     @app.exception_handler(PlaidError)
     def plaid_refused(_: Request, error: PlaidError) -> JSONResponse:
@@ -169,21 +181,48 @@ def create_app(
     app.mount("/health", create_health_app(pool))
     app.mount("/worker/v1", create_worker_app(pool))
     app.mount("/admin-secrets", console_app)
+    app.mount(
+        "/v1/agent-preview",
+        agent_search.create_agent_preview_app(
+            pool,
+            box,
+            p_key,
+            lambda: getattr(app.state, "harness_router", None),
+        ),
+    )
     return app
 
 
 def app_from_env() -> FastAPI:
     project_id = os.environ["IDENTITY_PROJECT_ID"]
     configure_cloud_logging(project_id)
+    box_key_str = os.environ["SECRET_BOX_KEY"]
     register_secret_for_redaction(
         os.environ.get("DATABASE_URL"),
         os.environ.get("PLAID_SECRET"),
-        os.environ.get("SECRET_BOX_KEY"),
+        box_key_str,
+        os.environ.get("HR_API_KEY"),
+        os.environ.get("HARNESSROUTER_API_KEY"),
     )
     pool = create_pool(os.environ["DATABASE_URL"], open_pool=False)
     keys = jwt.PyJWKClient(JWKS_URL)
     verifier = IdTokenVerifier(project_id, keys.get_signing_key_from_jwt)
-    box = SecretBox(os.environ["SECRET_BOX_KEY"])
+    box = SecretBox(box_key_str)
+    hr_client: HarnessRouter | None = None
+    try:
+        hr_key = load_api_key()
+        register_secret_for_redaction(hr_key)
+        hr_client = HarnessRouter(api_key=hr_key)
+    except ValueError:
+        hr_client = None
     raw_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
     origins = [item for item in raw_origins.split(",") if item.strip()]
-    return create_app(pool, verifier, plaid_client_from_env(), box, cors_origins=origins)
+    return create_app(
+        pool,
+        verifier,
+        plaid_client_from_env(),
+        box,
+        cors_origins=origins,
+        harness_router=hr_client,
+        preview_signing_key=preview_secret(box_key_str),
+    )

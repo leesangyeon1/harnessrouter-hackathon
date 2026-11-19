@@ -34,7 +34,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
             r"(?i)(plaid_secret|secret_box_key|worker_token|alpaca_secret_key|"
-            r"apca-api-secret-key|harnessrouter_api_key|tokenrouter_api_key|"
+            r"apca-api-secret-key|hr_api_key|harnessrouter_api_key|tokenrouter_api_key|"
             r"access_token|paper_key|private_key)(\s*[\"']?\s*[:=]\s*[\"']?)([^\s\"',}&]+)"
         ),
         r"\1\2[REDACTED]",

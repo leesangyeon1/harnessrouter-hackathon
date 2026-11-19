@@ -15,6 +15,68 @@ export type SyncCounts = {
   transactions_ready: boolean;
   unavailable: Partial<Record<"liabilities" | "holdings", string>>;
 };
+export type AgentCitation = {
+  URL?: string | null;
+  url?: string | null;
+  source_title?: string | null;
+  title?: string | null;
+  supported_facts?: string[];
+};
+export type VerifiedInstrument = {
+  name: string | null;
+  asset_type: string | null;
+  symbol: string | null;
+  exchange_or_venue: string | null;
+  quote_currency: string | null;
+  verification_status: string | null;
+  quote: Record<string, unknown> | string | null;
+  screening_evidence: Record<string, unknown> | string | null;
+  citations: AgentCitation[];
+};
+export type StructuredSearchResult = {
+  status:
+    | "ok"
+    | "partial"
+    | "needs_clarification"
+    | "unavailable"
+    | "out_of_scope"
+    | string;
+  query: string | null;
+  results: VerifiedInstrument[];
+  limitations: string[];
+  clarification: string | null;
+};
+export type AgentTaskFile = {
+  path: string;
+  filename: string;
+  bytes: number | null;
+  media_type: string;
+  download_path: string;
+};
+export type AgentTask = {
+  id: string;
+  status:
+    | "starting"
+    | "in_progress"
+    | "completed"
+    | "incomplete"
+    | "failed"
+    | "cancelled";
+  incomplete_reason: string | null;
+  query: string;
+  parent_task_id: string | null;
+  answer: string;
+  structured_result: StructuredSearchResult | null;
+  files: AgentTaskFile[];
+  preview_url: string | null;
+  can_continue: boolean;
+  created_at: string;
+  updated_at: string;
+};
+export type AgentProgressEvent =
+  | { kind: "activity"; label: string }
+  | { kind: "text"; delta: string }
+  | { kind: "done"; status: string };
 
 export function toCents(value: string): number {
   if (!/^-?\d+(\.\d{1,2})?$/.test(value))
@@ -119,7 +181,11 @@ export class FinanceApi {
   ) {
     this.origin = apiOrigin(origin);
   }
-  private async request(path: string, method = "GET"): Promise<unknown> {
+  private async request(
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ): Promise<unknown> {
     const token = await this.token();
     if (!token) throw new ApiError(401, "Sign in to connect your workspace.");
     let response: Response;
@@ -131,6 +197,7 @@ export class FinanceApi {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
         credentials: "omit",
         cache: "no-store",
         redirect: "error",
@@ -230,6 +297,118 @@ export class FinanceApi {
       if (error instanceof ApiError && error.status === 404) return null;
       throw error;
     }
+  }
+  previewFullUrl(previewPath: string): string {
+    return `${this.origin}${previewPath}`;
+  }
+  async startAgentTask(
+    input: string,
+    followUpTaskId?: string,
+  ): Promise<AgentTask> {
+    const payload: Record<string, string> = { input };
+    if (followUpTaskId) payload.follow_up_task_id = followUpTaskId;
+    return (await this.request(
+      "/v1/agent-tasks",
+      "POST",
+      payload,
+    )) as AgentTask;
+  }
+  async listAgentTasks(): Promise<AgentTask[]> {
+    const data = (await this.request("/v1/agent-tasks")) as {
+      tasks?: AgentTask[];
+    };
+    return Array.isArray(data?.tasks) ? data.tasks : [];
+  }
+  async getAgentTask(taskId: string): Promise<AgentTask> {
+    return (await this.request(
+      `/v1/agent-tasks/${encodeURIComponent(taskId)}`,
+    )) as AgentTask;
+  }
+  async cancelAgentTask(taskId: string): Promise<AgentTask> {
+    return (await this.request(
+      `/v1/agent-tasks/${encodeURIComponent(taskId)}/cancel`,
+      "POST",
+    )) as AgentTask;
+  }
+  async streamAgentTaskEvents(
+    taskId: string,
+    onEvent: (event: AgentProgressEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const token = await this.token();
+    if (!token) throw new ApiError(401, "Sign in to connect your workspace.");
+    const send = this.transport;
+    const response = await send(
+      `${this.origin}/v1/agent-tasks/${encodeURIComponent(taskId)}/events`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: "text/event-stream",
+        },
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        signal,
+      },
+    );
+    if (!response.ok || !response.body) return;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf = (buf + decoder.decode(value, { stream: true })).replace(
+        /\r\n/g,
+        "\n",
+      );
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const data = frame
+          .split("\n")
+          .filter((l) => l.startsWith("data:"))
+          .map((l) => l.slice(5).trimStart())
+          .join("\n");
+        if (!data || data === "[DONE]") continue;
+        try {
+          const parsed = JSON.parse(data) as AgentProgressEvent;
+          onEvent(parsed);
+          if (parsed.kind === "done") return;
+        } catch {
+          /* ignore malformed SSE frames */
+        }
+      }
+    }
+  }
+  async downloadAgentTaskFile(
+    downloadPath: string,
+    filename: string,
+  ): Promise<void> {
+    const token = await this.token();
+    if (!token) throw new ApiError(401, "Sign in to connect your workspace.");
+    const send = this.transport;
+    const response = await send(`${this.origin}${downloadPath}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "error",
+    });
+    if (!response.ok)
+      throw new ApiError(
+        response.status,
+        "The file could not be downloaded. Please try again.",
+      );
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 }
 

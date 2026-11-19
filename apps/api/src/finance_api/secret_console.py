@@ -67,8 +67,8 @@ MANAGED_SECRETS: tuple[ManagedSecretSpec, ...] = (
     ManagedSecretSpec(
         key="harnessrouter-api-key",
         label="HarnessRouter API Key",
-        env_name="HARNESSROUTER_API_KEY",
-        targets="Private Worker, Agent-Task Job",
+        env_name="HR_API_KEY / HARNESSROUTER_API_KEY",
+        targets="FastAPI Service (Hot-reloaded), Private Worker, Agent-Task Job",
         hint="Enter HarnessRouter key",
     ),
     ManagedSecretSpec(
@@ -514,6 +514,7 @@ def create_secret_console_app(
     public_config: PortalPublicConfig,
     *,
     on_plaid_credentials_updated: Callable[[str, str], None] | None = None,
+    on_harnessrouter_key_updated: Callable[[str], None] | None = None,
 ) -> FastAPI:
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
     app.state.owner_verifier = owner_verifier
@@ -598,6 +599,9 @@ def create_secret_console_app(
             if cid and csec:
                 on_plaid_credentials_updated(cid, csec)
                 hot_reloaded = True
+        if secret_key in ("harnessrouter-api-key",) and on_harnessrouter_key_updated:
+            on_harnessrouter_key_updated(cleaned)
+            hot_reloaded = True
         return {
             "secret": _summary_to_dict(updated),
             "hot_reloaded": hot_reloaded,
@@ -673,6 +677,7 @@ def build_default_secret_console(
     identity_signing_key: Callable[[str], jwt.PyJWK],
     *,
     on_plaid_credentials_updated: Callable[[str, str], None] | None = None,
+    on_harnessrouter_key_updated: Callable[[str], None] | None = None,
 ) -> FastAPI:
     raw_allowed = os.environ.get("SECRET_ADMIN_ALLOWED_EMAILS", DEFAULT_OWNER_EMAIL)
     allowed_emails = [item.strip() for item in raw_allowed.split(",") if item.strip()]
@@ -709,4 +714,5 @@ def build_default_secret_console(
         vault,
         pub_cfg,
         on_plaid_credentials_updated=on_plaid_credentials_updated,
+        on_harnessrouter_key_updated=on_harnessrouter_key_updated,
     )
