@@ -1062,3 +1062,209 @@ footer > span {
     flex: 1;
   }
 }
+.perf-mode-switcher {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px;
+  background: #f2f5f1;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  margin-bottom: 22px;
+  align-self: flex-start;
+}
+.perf-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #53695a;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.perf-mode-btn.active {
+  background: white;
+  border-color: #d6dfd8;
+  color: #1f2e24;
+  box-shadow: 0 2px 8px #26392e12;
+}
+.perf-mode-btn.active svg {
+  color: #a8402e;
+}
+.qcase-callout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #ffffff 0%, #f8fbf7 100%);
+}
+.qcase-callout h2 {
+  font-size: 16px;
+  color: var(--ink);
+  margin: 4px 0 6px;
+}
+.qcase-callout p {
+  font-size: 11px;
+  color: #53695a;
+  line-height: 1.65;
+  max-width: 720px;
+}
+.qcase-callout > .button {
+  flex-shrink: 0;
+}
+.qcase-root {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.qcase-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 0 24px 18px;
+}
+.qcase-leg-filter-bar {
+  padding-top: 16px;
+}
+.qcase-outcome-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.qcase-search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.qcase-search-wrap svg {
+  position: absolute;
+  left: 11px;
+  color: #6b7d70;
+  pointer-events: none;
+}
+.qcase-search-wrap input[type="search"] {
+  padding-left: 32px;
+  min-width: min(100%, 310px);
+}
+.qcase-table td,
+.qcase-legs-table td {
+  padding: 13px 18px;
+  vertical-align: middle;
+}
+.qcase-table th,
+.qcase-legs-table th {
+  padding: 11px 18px;
+}
+.qcase-row {
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+.qcase-row:hover td {
+  background: #f9fbf8;
+}
+.qcase-row.selected td {
+  background: #fff7f4;
+}
+.qcase-cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.qcase-regime-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.qcase-regime-note {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #4b5f51;
+}
+.qcase-inspect-btn {
+  padding: 6px 11px;
+  border-radius: 6px;
+  border: 1px solid #d5dfd7;
+  background: white;
+  color: #3a5242;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.qcase-inspect-btn.active {
+  background: #fff0eb;
+  border-color: #e4b5a9;
+  color: #a8402e;
+}
+.qcase-inspector-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.qcase-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.qcase-stepper select {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #d5dfd7;
+  background: white;
+  color: var(--ink);
+  font-size: 12px;
+  max-width: min(100%, 340px);
+}
+.qcase-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px 22px;
+  padding: 16px 24px;
+  background: #f8faf7;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: #3f5247;
+}
+.qcase-meta-strip > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.qcase-meta-strip .perf-gov-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.qcase-leg-count {
+  font-size: 11px;
+}
+.qcase-tfoot-row td {
+  background: #f7f9f6;
+  border-top: 2px solid var(--line);
+  color: #2f4336;
+  padding: 14px 18px;
+}
+@media (max-width: 760px) {
+  .qcase-callout {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .qcase-filter-bar {
+    padding: 0 18px 16px;
+  }
+}
