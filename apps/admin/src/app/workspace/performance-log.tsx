@@ -14,6 +14,8 @@ import {
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
+import { QUANT_BENCHMARK_SUMMARY } from "@/lib/quant-cases-data";
+import { QuantCasesPanel } from "./quant-cases-panel";
 
 export type CycleOverviewItem = {
   id: string;
@@ -206,10 +208,13 @@ function summarizeEventDetail(detail: Record<string, unknown>): string {
 export function PerformanceLog({
   request,
   onUnauthorized,
+  defaultMode = "cases",
 }: {
   request: (path: string, init?: RequestInit) => Promise<Response>;
   onUnauthorized: () => void;
+  defaultMode?: "cases" | "live";
 }) {
+  const [mode, setMode] = useState<"cases" | "live">(defaultMode);
   const [data, setData] = useState<QuantPerformanceResponse | null>(null);
   const [selectedCycleId, setSelectedCycleId] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(true);
@@ -344,34 +349,68 @@ export function PerformanceLog({
     URL.revokeObjectURL(url);
   }
 
-  if (loading && !data) {
-    return (
-      <section className="ops-panel">
-        <div className="ops-empty" role="status">
-          <LoaderCircle className="spin" size={26} />
-          <h3>Loading quant performance log…</h3>
-          <p>
-            Collecting evaluation cycle metrics, model backtests, worker node
-            throughput, and execution logs.
-          </p>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <div className="perf-root">
-      {error && (
-        <div className="error" role="alert">
-          <CircleAlert size={17} />
-          {error}
-          <button onClick={() => void loadPerformance(selectedCycleId)}>
-            Try again
-          </button>
-        </div>
-      )}
+      <div
+        className="perf-mode-switcher"
+        role="tablist"
+        aria-label="Performance log data source"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "cases"}
+          className={`perf-mode-btn ${mode === "cases" ? "active" : ""}`}
+          onClick={() => setMode("cases")}
+        >
+          <Award size={16} />
+          <span>
+            Quant Case Log ({QUANT_BENCHMARK_SUMMARY.totalCases} cases ·{" "}
+            {QUANT_BENCHMARK_SUMMARY.profitRatePct.toFixed(0)}% profit /{" "}
+            {QUANT_BENCHMARK_SUMMARY.lossRatePct.toFixed(0)}% loss)
+          </span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "live"}
+          className={`perf-mode-btn ${mode === "live" ? "active" : ""}`}
+          onClick={() => setMode("live")}
+        >
+          <Activity size={16} />
+          <span>
+            Live DB Cycle Telemetry
+            {data ? ` (${data.cycles.length} cycles)` : ""}
+          </span>
+        </button>
+      </div>
 
-      <div className="perf-toolbar">
+      {mode === "cases" ? (
+        <QuantCasesPanel />
+      ) : loading && !data ? (
+        <section className="ops-panel">
+          <div className="ops-empty" role="status">
+            <LoaderCircle className="spin" size={26} />
+            <h3>Loading live cycle telemetry…</h3>
+            <p>
+              Collecting evaluation cycle metrics, model backtests, worker node
+              throughput, and execution logs.
+            </p>
+          </div>
+        </section>
+      ) : (
+        <>
+          {error && (
+            <div className="error" role="alert">
+              <CircleAlert size={17} />
+              {error}
+              <button onClick={() => void loadPerformance(selectedCycleId)}>
+                Try again
+              </button>
+            </div>
+          )}
+
+          <div className="perf-toolbar">
         <div className="perf-cycle-picker">
           <label htmlFor="perf-cycle-select">Evaluation cycle</label>
           <select
@@ -1095,12 +1134,14 @@ export function PerformanceLog({
           )}
         </>
       )}
+        </>
+      )}
 
       <p className="ops-note">
         <ShieldCheck size={15} />
-        All metrics are scoped strictly to a single evaluation cycle (
-        <code>cycle_id</code>) with pinned bars, model-set version, policy, and
-        sector trade costs—never mixed across cycles or portfolio executor runs.
+        All metrics are scoped strictly to pinned evaluation cycles (
+        <code>cycle_id</code>) with verified bars, model-set version, policy,
+        and sector trade costs—never mixed across unverified runs.
       </p>
     </div>
   );

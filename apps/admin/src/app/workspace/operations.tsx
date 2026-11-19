@@ -24,6 +24,7 @@ import {
   X,
 } from "lucide-react";
 import { adminAuth, configured } from "@/lib/firebase";
+import { QUANT_BENCHMARK_SUMMARY } from "@/lib/quant-cases-data";
 import { sessionRequest } from "@/lib/session";
 import { PerformanceLog } from "./performance-log";
 const operationRequest = (path: string, init: RequestInit = {}) =>
@@ -291,6 +292,35 @@ export function Operations({
                   <small>No provider credentials on nodes</small>
                 </section>
               </div>
+              <section className="ops-panel qcase-callout">
+                <div>
+                  <span className="perf-gov-label">
+                    QUANT PERFORMANCE BENCHMARK LOG
+                  </span>
+                  <h2>
+                    {QUANT_BENCHMARK_SUMMARY.totalCases} multi-quant cases ·{" "}
+                    {QUANT_BENCHMARK_SUMMARY.profitCases} profit (
+                    {QUANT_BENCHMARK_SUMMARY.profitRatePct.toFixed(1)}%) /{" "}
+                    {QUANT_BENCHMARK_SUMMARY.lossCases} loss (
+                    {QUANT_BENCHMARK_SUMMARY.lossRatePct.toFixed(1)}%)
+                  </h2>
+                  <p>
+                    {QUANT_BENCHMARK_SUMMARY.totalLegExecutions} total execution
+                    legs (22 distinct quant strategies &amp; 22 tickers per
+                    case) with UTC entry/exit timestamps, prices, fees, Sharpe,
+                    drawdown, and cent-reconciled P&amp;L.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="button primary"
+                  onClick={() => setSection("performance")}
+                >
+                  <BarChart3 size={16} />
+                  Open 30-case performance log
+                  <ArrowRight size={15} />
+                </button>
+              </section>
               {secret && (
                 <section className="secret-panel">
                   <div>
@@ -442,6 +472,8 @@ export function Operations({
             </>
           ) : section === "performance" || section === "cycles" ? (
             <PerformanceLog
+              key={section}
+              defaultMode={section === "cycles" ? "live" : "cases"}
               request={operationRequest}
               onUnauthorized={() => {
                 setTokens([]);
