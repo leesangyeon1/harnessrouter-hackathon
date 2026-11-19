@@ -56,6 +56,17 @@ liabilities and holdings through the client the service uses, and prints a repor
 credential or token in it. It touches no database. The exit status is 0 when the spending demo's
 path works.
 
+What the real Sandbox has shown so far, run by Developer on 2026-11-19 with the Sandbox
+credentials in Secret Manager and reported in the project room:
+
+- The credentials authenticate, and `ins_109508` lists transactions, liabilities and investments.
+- A custom user holding a `loan`-type liability in the shape Plaid documents makes Item creation
+  fail with `INTERNAL_SERVER_ERROR`. A credit card alone, a student loan alone, and transactions
+  with investments each succeed. The cause is not known (shared task #15).
+- So `plaid_seed.json` holds no `loan`-type account for now, and the refinance figures can cover
+  student loans only, as the plan's U0 (a) leaves room for.
+- The seed file as it stands now has not been run against the Sandbox yet.
+
 ## Running the market ingest job
 
 The first step of a cycle: it reads Alpaca's asset list and daily bars, screens each sector, and

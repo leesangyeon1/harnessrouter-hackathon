@@ -82,20 +82,6 @@
       }
     },
     {
-      "type": "loan",
-      "subtype": "loan",
-      "liability": {
-        "type": "loan",
-        "interest_rate": {
-          "percentage": 11.5,
-          "type": "fixed"
-        },
-        "principal_balance": 9000,
-        "loan_term_months": 48,
-        "maturity_date": "2029-06-01"
-      }
-    },
-    {
       "type": "investment",
       "subtype": "brokerage",
       "holdings": [

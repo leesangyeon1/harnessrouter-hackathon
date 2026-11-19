@@ -510,17 +510,10 @@ def test_seed_configuration_follows_plaids_custom_user_schema() -> None:
         # history Plaid returns by default (F8).
         assert timedelta(days=1) <= today - posted <= timedelta(days=90)
     liabilities = [account["liability"] for account in accounts if "liability" in account]
-    assert {liability["type"] for liability in liabilities} <= {
-        "credit",
-        "student",
-        "loan",
-        "line_of_credit",
-    }
+    # Only the kinds the real Sandbox has accepted. A `loan`-type liability in the documented
+    # shape made Item creation fail with INTERNAL_SERVER_ERROR (shared task #15).
+    assert {liability["type"] for liability in liabilities} == {"credit", "student"}
     for liability in liabilities:
-        if liability["type"] == "loan":
-            assert set(liability["interest_rate"]) == {"percentage", "type"}
-            assert liability["interest_rate"]["type"] in ("fixed", "variable")
-            assert "nominal_apr" not in liability
         if liability["type"] == "credit":
             assert 0 <= liability["purchase_apr"] <= 100
     for account in accounts:
@@ -713,5 +706,5 @@ def test_probe_command_prints_the_report_and_exits_by_readiness(
     printed = capsys.readouterr().out
     assert status == 0
     assert json.loads(printed)["spending_demo_ready"] is True
-    assert json.loads(printed)["accounts"]["configured"] == 6
+    assert json.loads(printed)["accounts"]["configured"] == 5
     assert plaid.access_token not in printed
