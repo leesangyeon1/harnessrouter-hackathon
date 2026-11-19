@@ -3,6 +3,7 @@
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
+from decimal import Decimal
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -94,3 +95,8 @@ def tenant_transaction(pool: ConnectionPool, user_id: str) -> Iterator[psycopg.C
     with pool.connection() as conn, conn.transaction():
         conn.execute("SELECT set_config('app.user_id', %s, true)", (user_id,))
         yield conn
+
+
+def exact(value: float | None) -> Decimal | None:
+    """The float as the decimal it prints as, so that numeric stores it without rounding."""
+    return None if value is None else Decimal(repr(value))

@@ -56,7 +56,7 @@ class Unit:
 
 @pytest.fixture(scope="module")
 def api(
-    _migrated_urls: tuple[str, str], no_plaid: PlaidClient, secret_box: SecretBox
+    _migrated_urls: tuple[str, str, str], no_plaid: PlaidClient, secret_box: SecretBox
 ) -> Iterator[str]:
     """Base URL of the service, listening on a free loopback port."""
 

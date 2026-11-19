@@ -6,7 +6,6 @@ here accepts an ID token, and no route elsewhere accepts a worker token.
 
 import hashlib
 from dataclasses import asdict
-from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -17,6 +16,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
+from finance_api.db import exact
 from finance_core.quant import MODEL_IDS, Bar, ModePolicy, TradeCosts, bars_digest
 
 # Assumed. U0 (e) measures how long the models take on a node.
@@ -173,11 +173,6 @@ def _mismatch(unit: dict[str, Any], bars: list[Bar], upload: ResultUpload) -> st
     return None
 
 
-def _exact(value: float | None) -> Decimal | None:
-    """The float as the decimal it prints as, so that numeric stores it without rounding."""
-    return None if value is None else Decimal(repr(value))
-
-
 def create_worker_app(pool: ConnectionPool) -> FastAPI:
     app = FastAPI(
         dependencies=[Depends(current_worker)], docs_url=None, redoc_url=None, openapi_url=None
@@ -229,11 +224,11 @@ def create_worker_app(pool: ConnectionPool) -> FastAPI:
                         (
                             *ticker,
                             result.model_id,
-                            _exact(result.selection.net_return),
-                            _exact(result.selection.sharpe),
-                            _exact(result.selection.max_drawdown),
-                            _exact(result.confirmation.net_return),
-                            _exact(result.next_position),
+                            exact(result.selection.net_return),
+                            exact(result.selection.sharpe),
+                            exact(result.selection.max_drawdown),
+                            exact(result.confirmation.net_return),
+                            exact(result.next_position),
                         )
                         for result in upload.results
                     ],

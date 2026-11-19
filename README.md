@@ -41,6 +41,19 @@ PLAID_CLIENT_ID=<id> PLAID_SECRET=<Sandbox secret> SECRET_BOX_KEY=<Fernet key> \
 keep it in Secret Manager. Plaid is reached at `sandbox.plaid.com` only: the service refuses to
 start if `PLAID_HOST` names any other host.
 
+## Running the market ingest job
+
+The first step of a cycle: it reads Alpaca's asset list and daily bars, screens each sector, and
+stores the cycle with one work unit per selected ticker.
+
+```sh
+DATABASE_URL=<cycle role's URL> ALPACA_API_KEY=<key id> ALPACA_SECRET_KEY=<secret> \
+  uv run --all-packages python -m finance_api.jobs market-ingest
+```
+
+`ALPACA_FEED` is `iex` unless set to `sip`; it must be the feed the key is entitled to, and it is
+stored with every screen. A second start on the same day creates no second cycle.
+
 ## Running a worker on a node
 
 An admin issues a token with `POST /v1/admin/worker-tokens`; the response is the only place the

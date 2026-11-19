@@ -21,6 +21,7 @@ from finance_api.sealing import SecretBox
 
 MIGRATOR = "test_migrator"
 API_LOGIN = "test_api"
+CYCLE_LOGIN = "test_cycle"
 PASSWORD = "test-only"  # noqa: S105
 PROJECT = "demo-project"
 KID = "test-kid"
@@ -79,26 +80,37 @@ def fresh_database_url(server_url: str) -> Iterator[str]:
 
 
 @pytest.fixture(scope="session")
-def _migrated_urls(server_url: str) -> Iterator[tuple[str, str]]:
+def _migrated_urls(server_url: str) -> Iterator[tuple[str, str, str]]:
     name, migrator_url = _create_database(server_url)
     with psycopg.connect(migrator_url) as conn:
         apply_migrations(conn)
     with psycopg.connect(server_url, autocommit=True) as admin:
         _ensure_login_role(admin, API_LOGIN, "IN ROLE finance_api")
-    yield migrator_url, make_conninfo(server_url, user=API_LOGIN, password=PASSWORD, dbname=name)
+        _ensure_login_role(admin, CYCLE_LOGIN, "IN ROLE finance_cycle")
+    yield (
+        migrator_url,
+        make_conninfo(server_url, user=API_LOGIN, password=PASSWORD, dbname=name),
+        make_conninfo(server_url, user=CYCLE_LOGIN, password=PASSWORD, dbname=name),
+    )
     _drop_database(server_url, name)
 
 
 @pytest.fixture
-def migrator_url(_migrated_urls: tuple[str, str]) -> str:
+def migrator_url(_migrated_urls: tuple[str, str, str]) -> str:
     """The migrated database as the role that owns every table. Not a superuser."""
     return _migrated_urls[0]
 
 
 @pytest.fixture
-def api_url(_migrated_urls: tuple[str, str]) -> str:
+def api_url(_migrated_urls: tuple[str, str, str]) -> str:
     """The migrated database as a login member of finance_api."""
     return _migrated_urls[1]
+
+
+@pytest.fixture
+def cycle_url(_migrated_urls: tuple[str, str, str]) -> str:
+    """The migrated database as a login member of finance_cycle."""
+    return _migrated_urls[2]
 
 
 @pytest.fixture(scope="session")
