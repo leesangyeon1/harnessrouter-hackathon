@@ -35,6 +35,7 @@ locals {
       accessors = [
         google_service_account.api.email,
         google_service_account.executor_job.email,
+        google_service_account.worker.email,
       ]
     }
     plaid_client_id = {
