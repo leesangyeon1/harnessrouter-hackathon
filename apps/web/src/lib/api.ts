@@ -46,6 +46,7 @@ export type StructuredSearchResult = {
   limitations: string[];
   clarification: string | null;
 };
+export type AgentFeatureKey = "advisor" | "search";
 export type AgentTaskFile = {
   path: string;
   filename: string;
@@ -55,6 +56,7 @@ export type AgentTaskFile = {
 };
 export type AgentTask = {
   id: string;
+  feature_key?: AgentFeatureKey;
   status:
     | "starting"
     | "in_progress"
@@ -303,18 +305,26 @@ export class FinanceApi {
   }
   async startAgentTask(
     input: string,
-    followUpTaskId?: string,
+    options?: {
+      featureKey?: AgentFeatureKey;
+      followUpTaskId?: string;
+    },
   ): Promise<AgentTask> {
     const payload: Record<string, string> = { input };
-    if (followUpTaskId) payload.follow_up_task_id = followUpTaskId;
+    if (options?.featureKey) payload.feature_key = options.featureKey;
+    if (options?.followUpTaskId)
+      payload.follow_up_task_id = options.followUpTaskId;
     return (await this.request(
       "/v1/agent-tasks",
       "POST",
       payload,
     )) as AgentTask;
   }
-  async listAgentTasks(): Promise<AgentTask[]> {
-    const data = (await this.request("/v1/agent-tasks")) as {
+  async listAgentTasks(featureKey?: AgentFeatureKey): Promise<AgentTask[]> {
+    const suffix = featureKey
+      ? `?feature_key=${encodeURIComponent(featureKey)}`
+      : "";
+    const data = (await this.request(`/v1/agent-tasks${suffix}`)) as {
       tasks?: AgentTask[];
     };
     return Array.isArray(data?.tasks) ? data.tasks : [];

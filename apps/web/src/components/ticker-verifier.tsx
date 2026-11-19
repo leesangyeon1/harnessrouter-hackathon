@@ -127,7 +127,7 @@ export function TickerVerifier({
     if (!api || demo) return;
     let cancelled = false;
     void api
-      .listAgentTasks()
+      .listAgentTasks("search")
       .then((loaded) => {
         if (cancelled) return;
         setTasks(loaded);
@@ -158,7 +158,9 @@ export function TickerVerifier({
     setSubmitting(true);
     setError(null);
     try {
-      const created = await api.startAgentTask(trimmed);
+      const created = await api.startAgentTask(trimmed, {
+        featureKey: "search",
+      });
       setQueryInput("");
       setActiveTask(created);
       upsertTaskList(created);
@@ -182,7 +184,10 @@ export function TickerVerifier({
     setSubmitting(true);
     setError(null);
     try {
-      const created = await api.startAgentTask(trimmed, activeTask.id);
+      const created = await api.startAgentTask(trimmed, {
+        featureKey: "search",
+        followUpTaskId: activeTask.id,
+      });
       setFollowUpInput("");
       setActiveTask(created);
       upsertTaskList(created);
@@ -613,7 +618,9 @@ export function TickerVerifier({
                 type="button"
                 className="text-button"
                 onClick={() =>
-                  void api.listAgentTasks().then((list) => setTasks(list))
+                  void api
+                    .listAgentTasks("search")
+                    .then((list) => setTasks(list))
                 }
               >
                 <RefreshCw size={14} />

@@ -1,8 +1,13 @@
-"""Authenticated Market Ticker Search agent routes powered by HarnessRouter Cloud.
+"""Authenticated Personal Finance Advisor & Market Ticker Search routes on HarnessRouter Cloud.
 
-Connects product end users to Harness `chrn_b431839c5f1318c5ab641703b8cd0279` (`hermes`,
-`deepseek-v4-pro`) while keeping `HR_API_KEY`, `harness_id`, `response_id`, `session_id`, and
-upstream `download_url`s strictly on the server and enforcing PostgreSQL Forced RLS per user.
+Maps product features strictly on the server:
+- `advisor` -> `chrn_e353c7f7ce02811c763f7150b10b3139` (`Personal Finance Advisor`, `hermes`,
+  `deepseek-v4-pro`, per-user memory via signed-in `user_id`)
+- `search`  -> `chrn_b431839c5f1318c5ab641703b8cd0279` (`Market ticker search`, `hermes`,
+  `deepseek-v4-pro`)
+
+Keeps `HR_API_KEY`, `harness_id`, `response_id`, `session_id`, and upstream `download_url`s
+strictly on the server and enforces PostgreSQL Forced RLS per user.
 """
 
 from __future__ import annotations
@@ -14,11 +19,11 @@ import threading
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from cryptography.fernet import InvalidToken
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -47,7 +52,16 @@ from finance_api.sealing import SecretBox
 
 logger = logging.getLogger(__name__)
 
+ADVISOR_HARNESS_ID = "chrn_e353c7f7ce02811c763f7150b10b3139"
 MARKET_SEARCH_HARNESS_ID = "chrn_b431839c5f1318c5ab641703b8cd0279"
+
+FeatureKey = Literal["advisor", "search"]
+
+HARNESS_BY_FEATURE: dict[FeatureKey, str] = {
+    "advisor": ADVISOR_HARNESS_ID,
+    "search": MARKET_SEARCH_HARNESS_ID,
+}
+
 DEFAULT_COST_CAP_USD = Decimal("1.00")
 DEFAULT_TIMEOUT_SECONDS = 600
 
@@ -61,8 +75,13 @@ _active_lock = threading.Lock()
 class CreateAgentTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    input: str = Field(min_length=1, max_length=4000)
+    input: str = Field(min_length=1, max_length=8000)
+    feature_key: FeatureKey | None = None
     follow_up_task_id: UUID | None = None
+
+
+def _resolve_feature_key(raw_kind: Any) -> FeatureKey:
+    return "search" if str(raw_kind) == "search" else "advisor"
 
 
 def _sanitize_file_entries(raw_files: list[Json]) -> list[dict[str, Any]]:
@@ -133,6 +152,7 @@ def _format_task_for_browser(
     signing_key: bytes,
 ) -> dict[str, Any]:
     task_id: UUID = row["id"]
+    feature_key = _resolve_feature_key(row.get("kind"))
     raw_status = str(row["status"])
     hide_answer = raw_status in ("failed", "cancelled")
     answer = "" if hide_answer else str(row.get("result_text") or "")
@@ -169,14 +189,19 @@ def _format_task_for_browser(
     created_at: datetime = row["created_at"]
     updated_at: datetime = row.get("updated_at") or created_at
 
+    structured = (
+        parse_structured_answer(answer) if feature_key == "search" and not hide_answer else None
+    )
+
     return {
         "id": str(task_id),
+        "feature_key": feature_key,
         "status": raw_status,
         "incomplete_reason": row.get("incomplete_reason"),
         "query": str(row.get("query_text") or ""),
         "parent_task_id": None if row.get("parent_task_id") is None else str(row["parent_task_id"]),
         "answer": answer,
-        "structured_result": None if hide_answer else parse_structured_answer(answer),
+        "structured_result": structured,
         "files": public_files,
         "preview_url": preview_url,
         "can_continue": raw_status in ("completed", "incomplete") and has_response_id,
@@ -264,6 +289,8 @@ def _run_task_worker_thread(
     get_hr: Callable[[], HarnessRouter],
     *,
     task_id: UUID,
+    feature_key: FeatureKey,
+    harness_id: str,
     user_id: str,
     idempotency_key: str,
     user_input: str,
@@ -276,6 +303,11 @@ def _run_task_worker_thread(
     with _active_lock:
         _active_tasks.add(key_str)
     captured_sid = session_id or ""
+    connected_label = (
+        "Connected to finance advisor"
+        if feature_key == "advisor"
+        else "Connected to research agent"
+    )
     try:
         hr = get_hr()
 
@@ -290,7 +322,7 @@ def _run_task_worker_thread(
                     " WHERE id = %s AND status NOT IN ('cancelled', 'completed', 'failed')",
                     (rid, captured_sid, task_id),
                 )
-            publish_progress(key_str, {"kind": "activity", "label": "Connected to research agent"})
+            publish_progress(key_str, {"kind": "activity", "label": connected_label})
 
         def on_event(ev: Json) -> None:
             prog = to_progress(ev)
@@ -298,7 +330,7 @@ def _run_task_worker_thread(
                 publish_progress(key_str, prog)
 
         terminal = hr.run_streamed(
-            MARKET_SEARCH_HARNESS_ID,
+            harness_id,
             user_input,
             previous_response_id=previous_response_id,
             session_id=session_id,
@@ -315,7 +347,7 @@ def _run_task_worker_thread(
             {"kind": "done", "status": str(terminal.get("status") or "completed")},
         )
     except Exception:
-        logger.exception("Agent search task %s failed", task_id)
+        logger.exception("Agent task %s (%s) failed", task_id, feature_key)
         with tenant_transaction(pool, user_id) as conn:
             conn.execute(
                 "UPDATE agent_tasks SET status = 'failed', updated_at = now()"
@@ -337,7 +369,7 @@ def _get_hr_from_request(request: Request) -> HarnessRouter:
     if hr is None:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "The instrument verification agent is not configured yet.",
+            "The finance agent service is not configured yet.",
         )
     return hr
 
@@ -348,7 +380,7 @@ def _fetch_owned_task(pool: ConnectionPool, user_id: str, task_id: UUID) -> dict
             "SELECT id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
             " harness_task_id, session_id, status, query_text, parent_task_id,"
             " result_text, files, incomplete_reason, created_at, updated_at"
-            " FROM agent_tasks WHERE id = %s AND kind = 'search'",
+            " FROM agent_tasks WHERE id = %s AND kind IN ('advisor', 'search')",
             (task_id,),
         ).fetchone()
     if row is None:
@@ -357,18 +389,16 @@ def _fetch_owned_task(pool: ConnectionPool, user_id: str, task_id: UUID) -> dict
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_search_task(
+def create_agent_task(
     payload: CreateAgentTaskRequest,
     request: Request,
     user_id: User,
 ) -> dict[str, Any]:
-    """Start a new instrument verification task or follow up on an owned finished task."""
+    """Start a new agent task (`advisor` or `search`) or follow up on an owned finished task."""
     _ = _get_hr_from_request(request)
     cleaned_input = payload.input.strip()
     if not cleaned_input:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT, "Please enter a ticker or query."
-        )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Please enter a request.")
 
     pool: ConnectionPool = request.app.state.pool
     box: SecretBox = request.app.state.box
@@ -377,35 +407,45 @@ def create_search_task(
     prev_response_id: str | None = None
     prev_session_id: str | None = None
     parent_id = payload.follow_up_task_id
+    resolved_feature: FeatureKey = payload.feature_key or "advisor"
 
     with tenant_transaction(pool, user_id) as conn, conn.cursor(row_factory=dict_row) as cur:
         if parent_id is not None:
             parent = cur.execute(
-                "SELECT id, status, harness_task_id, session_id"
-                " FROM agent_tasks WHERE id = %s AND kind = 'search'",
+                "SELECT id, kind, status, harness_task_id, session_id"
+                " FROM agent_tasks WHERE id = %s AND kind IN ('advisor', 'search')",
                 (parent_id,),
             ).fetchone()
             if parent is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Original task not found.")
+            parent_feature = _resolve_feature_key(parent["kind"])
+            if payload.feature_key is not None and payload.feature_key != parent_feature:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "A follow-up must continue on the same feature as the original task.",
+                )
             if parent["status"] not in ("completed", "incomplete") or not parent["harness_task_id"]:
                 raise HTTPException(
                     status.HTTP_409_CONFLICT,
-                    "Wait for the current verification to finish before sending a follow-up.",
+                    "Wait for the current task to finish before sending a follow-up.",
                 )
+            resolved_feature = parent_feature
             prev_response_id = str(parent["harness_task_id"])
             prev_session_id = str(parent["session_id"]) if parent["session_id"] else None
 
+        target_harness_id = HARNESS_BY_FEATURE[resolved_feature]
         idem_key = str(uuid4())
         inserted = cur.execute(
             "INSERT INTO agent_tasks"
             " (user_id, kind, idempotency_key, cost_cap_usd, timeout_seconds, status,"
             "  query_text, parent_task_id, session_id)"
-            " VALUES (%s, 'search', %s, %s, %s, 'starting', %s, %s, %s)"
+            " VALUES (%s, %s, %s, %s, %s, 'starting', %s, %s, %s)"
             " RETURNING id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
             " harness_task_id, session_id, status, query_text, parent_task_id,"
             " result_text, files, incomplete_reason, created_at, updated_at",
             (
                 user_id,
+                resolved_feature,
                 idem_key,
                 DEFAULT_COST_CAP_USD,
                 DEFAULT_TIMEOUT_SECONDS,
@@ -433,6 +473,8 @@ def create_search_task(
             "pool": pool,
             "get_hr": get_current_hr,
             "task_id": inserted["id"],
+            "feature_key": resolved_feature,
+            "harness_id": target_harness_id,
             "user_id": user_id,
             "idempotency_key": idem_key,
             "user_input": cleaned_input,
@@ -449,19 +491,33 @@ def create_search_task(
 
 
 @router.get("")
-def list_search_tasks(request: Request, user_id: User) -> dict[str, Any]:
-    """Return the signed-in user's recent instrument verification tasks."""
+def list_agent_tasks(
+    request: Request,
+    user_id: User,
+    feature_key: Annotated[FeatureKey | None, Query()] = None,
+) -> dict[str, Any]:
+    """Return the signed-in user's recent agent tasks, optionally filtered by `feature_key`."""
     pool: ConnectionPool = request.app.state.pool
     box: SecretBox = request.app.state.box
     signing_key: bytes = request.app.state.preview_signing_key
     with tenant_transaction(pool, user_id) as conn, conn.cursor(row_factory=dict_row) as cur:
-        rows = cur.execute(
-            "SELECT id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
-            " harness_task_id, session_id, status, query_text, parent_task_id,"
-            " result_text, files, incomplete_reason, created_at, updated_at"
-            " FROM agent_tasks WHERE kind = 'search'"
-            " ORDER BY created_at DESC, id DESC LIMIT 20"
-        ).fetchall()
+        if feature_key is not None:
+            rows = cur.execute(
+                "SELECT id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
+                " harness_task_id, session_id, status, query_text, parent_task_id,"
+                " result_text, files, incomplete_reason, created_at, updated_at"
+                " FROM agent_tasks WHERE kind = %s"
+                " ORDER BY created_at DESC, id DESC LIMIT 20",
+                (feature_key,),
+            ).fetchall()
+        else:
+            rows = cur.execute(
+                "SELECT id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
+                " harness_task_id, session_id, status, query_text, parent_task_id,"
+                " result_text, files, incomplete_reason, created_at, updated_at"
+                " FROM agent_tasks WHERE kind IN ('advisor', 'search')"
+                " ORDER BY created_at DESC, id DESC LIMIT 20"
+            ).fetchall()
     return {
         "tasks": [
             _format_task_for_browser(row, user_id=user_id, box=box, signing_key=signing_key)
@@ -471,7 +527,7 @@ def list_search_tasks(request: Request, user_id: User) -> dict[str, Any]:
 
 
 @router.get("/{task_id}")
-def get_search_task(task_id: UUID, request: Request, user_id: User) -> dict[str, Any]:
+def get_agent_task(task_id: UUID, request: Request, user_id: User) -> dict[str, Any]:
     """Return one owned task, recovering via upstream poll if no local stream is active."""
     pool: ConnectionPool = request.app.state.pool
     box: SecretBox = request.app.state.box
@@ -507,12 +563,16 @@ def get_search_task(task_id: UUID, request: Request, user_id: User) -> dict[str,
 
 
 @router.get("/{task_id}/events")
-async def stream_search_task_events(
+async def stream_agent_task_events(
     task_id: UUID, request: Request, user_id: User
 ) -> StreamingResponse:
     """Stream sanitized SSE progress frames for an owned task."""
     pool: ConnectionPool = request.app.state.pool
     row = await asyncio.to_thread(_fetch_owned_task, pool, user_id, task_id)
+    feature_key = _resolve_feature_key(row.get("kind"))
+    starting_label = (
+        "Starting financial analysis" if feature_key == "advisor" else "Starting verification"
+    )
 
     async def event_generator() -> AsyncIterator[bytes]:
         if row["status"] in TERMINAL_STATUSES:
@@ -534,7 +594,7 @@ async def stream_search_task_events(
                 yield f"data: {done_frame}\n\n".encode()
                 return
 
-            start_frame = json.dumps({"kind": "activity", "label": "Starting verification"})
+            start_frame = json.dumps({"kind": "activity", "label": starting_label})
             yield f"data: {start_frame}\n\n".encode()
             while True:
                 try:
@@ -563,7 +623,7 @@ async def stream_search_task_events(
 
 
 @router.post("/{task_id}/cancel")
-def cancel_search_task(task_id: UUID, request: Request, user_id: User) -> dict[str, Any]:
+def cancel_agent_task(task_id: UUID, request: Request, user_id: User) -> dict[str, Any]:
     """Cancel an owned in-progress task."""
     pool: ConnectionPool = request.app.state.pool
     box: SecretBox = request.app.state.box
@@ -593,7 +653,7 @@ def cancel_search_task(task_id: UUID, request: Request, user_id: User) -> dict[s
 
 
 @router.get("/{task_id}/files/{file_path:path}")
-def download_search_task_file(
+def download_agent_task_file(
     task_id: UUID, file_path: str, request: Request, user_id: User
 ) -> Response:
     """Owner-checked server-side download for a produced session file."""
@@ -643,7 +703,8 @@ def create_agent_preview_app(
 
         with tenant_transaction(pool, user_id) as conn:
             row = conn.execute(
-                "SELECT session_id FROM agent_tasks WHERE id = %s AND kind = 'search'",
+                "SELECT session_id FROM agent_tasks"
+                " WHERE id = %s AND kind IN ('advisor', 'search')",
                 (task_id,),
             ).fetchone()
         if row is None or not row[0]:
@@ -667,15 +728,17 @@ def execute_worker_harness_task(
     """Runner compatible with `task_worker.create_task_worker_app` for Cloud Tasks execution."""
     with tenant_transaction(pool, user_id) as conn:
         row = conn.execute(
-            "SELECT idempotency_key, query_text, session_id FROM agent_tasks WHERE id = %s",
+            "SELECT kind, idempotency_key, query_text, session_id FROM agent_tasks WHERE id = %s",
             (task_id,),
         ).fetchone()
     if row is None:
         raise RuntimeError(f"agent_task {task_id} missing")
-    idem_key, query_text, sid = row
-    prompt = str(query_text or "Verify requested instruments")
+    kind, idem_key, query_text, sid = row
+    feature_key = _resolve_feature_key(kind)
+    target_harness_id = HARNESS_BY_FEATURE[feature_key]
+    prompt = str(query_text or "Analyze requested financial scenario")
     terminal = hr.run_streamed(
-        MARKET_SEARCH_HARNESS_ID,
+        target_harness_id,
         prompt,
         session_id=str(sid) if sid else None,
         idempotency_key=str(idem_key),

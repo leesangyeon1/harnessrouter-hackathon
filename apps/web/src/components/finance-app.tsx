@@ -74,11 +74,13 @@ import {
 } from "@/lib/demo";
 import { authConfigured, identityAuth } from "@/lib/firebase";
 import { CycleDiscovery } from "./cycle-discovery";
+import { FinanceAdvisor } from "./finance-advisor";
 import { SyncNotice } from "./sync-notice";
 import { TickerVerifier } from "./ticker-verifier";
 
 type View =
   | "overview"
+  | "advisor"
   | "spending"
   | "accounts"
   | "cards"
@@ -95,6 +97,7 @@ const navigation: {
   section?: string;
 }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
+  { id: "advisor", label: "Finance advisor", icon: Sparkles },
   { id: "spending", label: "Spending", icon: ChartNoAxesCombined },
   { id: "accounts", label: "Accounts", icon: Landmark },
   { id: "cards", label: "Cards & loans", icon: CreditCard },
@@ -109,6 +112,7 @@ const navigation: {
 ];
 const titles: Record<View, string> = {
   overview: "Your money, in view.",
+  advisor: "Compare with confidence.",
   spending: "Know where it goes.",
   accounts: "All together, at last.",
   cards: "A clearer picture of credit.",
@@ -786,8 +790,10 @@ export function FinanceApp() {
               <h1>{titles[view]}</h1>
               <p className="page-subtitle">
                 {view === "overview"
-                  ? "A clearer picture. A little more peace of mind."
-                  : view === "spending"
+                  ? "Compare cards, debt payoff, and refinancing right alongside your balances."
+                  : view === "advisor"
+                    ? "Evaluate credit-card paydown, balance transfers, and loan refinancing with verified numbers."
+                    : view === "spending"
                     ? "The little things add up. See the whole picture."
                     : view === "accounts"
                       ? "Your accounts, with a little less back and forth."
@@ -803,7 +809,9 @@ export function FinanceApp() {
               </p>
             </div>
             <div className="heading-actions">
-              {view === "discovery" || view === "verifier" ? (
+              {view === "discovery" ||
+              view === "verifier" ||
+              view === "advisor" ? (
                 demo ? (
                   <button
                     className="button primary"
@@ -812,14 +820,18 @@ export function FinanceApp() {
                   >
                     {view === "verifier"
                       ? "Sign in to verify"
-                      : "Sign in for latest cycle"}
+                      : view === "advisor"
+                        ? "Sign in to analyze"
+                        : "Sign in for latest cycle"}
                     <ArrowRight size={15} />
                   </button>
                 ) : (
                   <span className="pill neutral-pill">
                     {view === "verifier"
                       ? "Read-only public lookup"
-                      : "Read-only screen"}
+                      : view === "advisor"
+                        ? "Per-user advisor memory"
+                        : "Read-only screen"}
                   </span>
                 )
               ) : (
@@ -896,6 +908,11 @@ export function FinanceApp() {
 
           {view === "overview" && (
             <>
+              <FinanceAdvisor
+                api={verifierApi}
+                demo={demo}
+                onRequireSignIn={() => setDialog("auth")}
+              />
               <div className="overview-top-grid">
                 <section className="panel worth-panel">
                   <div className="card-heading">
@@ -1555,14 +1572,14 @@ export function FinanceApp() {
                 <section className="panel">
                   <Empty
                     icon={CreditCard}
-                    title="A clearer credit picture is coming"
-                    text="Your service’s card and refinance reports are still being connected. Your spending report is available now."
+                    title="Compare your card & loan scenarios"
+                    text="Run verified payoff, balance-transfer, and refinancing comparisons in Finance advisor."
                     action={
                       <button
                         className="button secondary"
-                        onClick={() => go("spending")}
+                        onClick={() => go("advisor")}
                       >
-                        View spending
+                        Open Finance advisor
                         <ArrowRight size={15} />
                       </button>
                     }
@@ -1877,6 +1894,14 @@ export function FinanceApp() {
                   : "Published selections are screening results, not model-performance winners."}
               </p>
             </>
+          )}
+
+          {view === "advisor" && (
+            <FinanceAdvisor
+              api={verifierApi}
+              demo={demo}
+              onRequireSignIn={() => setDialog("auth")}
+            />
           )}
 
           {view === "verifier" && (
