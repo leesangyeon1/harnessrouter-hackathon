@@ -21,7 +21,7 @@ router = APIRouter(prefix="/v1/plaid")
 User = Annotated[str, Depends(current_user)]
 
 
-def _custom_user() -> Row:
+def custom_user() -> Row:
     """The invented user this MVP runs on (DW1). Its figures are synthetic."""
     seed = files("finance_api").joinpath("plaid_seed.json").read_text(encoding="utf-8")
     custom_user: Row = json.loads(seed)
@@ -38,7 +38,7 @@ def seed(request: Request, user_id: User) -> dict[str, str]:
     with tenant_transaction(pool, user_id) as conn:
         if conn.execute("SELECT 1 FROM plaid_items").fetchone() is not None:
             raise already
-    item_id, access_token = plaid.create_item(_custom_user())
+    item_id, access_token = plaid.create_item(custom_user())
     try:
         with tenant_transaction(pool, user_id) as conn:
             conn.execute(

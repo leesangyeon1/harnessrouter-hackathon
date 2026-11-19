@@ -41,6 +41,21 @@ PLAID_CLIENT_ID=<id> PLAID_SECRET=<Sandbox secret> SECRET_BOX_KEY=<Fernet key> \
 keep it in Secret Manager. Plaid is reached at `sandbox.plaid.com` only: the service refuses to
 start if `PLAID_HOST` names any other host.
 
+## Checking Plaid against the real Sandbox
+
+The tests answer for Plaid with a faked transport. To see what the real Sandbox returns, run this
+where `PLAID_CLIENT_ID` and `PLAID_SECRET` hold Sandbox credentials:
+
+```sh
+PLAID_CLIENT_ID=<id> PLAID_SECRET=<Sandbox secret> \
+  uv run --all-packages python -m finance_api.plaid_probe
+```
+
+It creates one custom-user Item from `plaid_seed.json`, reads back its accounts, transactions,
+liabilities and holdings through the client the service uses, and prints a report with no
+credential or token in it. It touches no database. The exit status is 0 when the spending demo's
+path works.
+
 ## Running the market ingest job
 
 The first step of a cycle: it reads Alpaca's asset list and daily bars, screens each sector, and

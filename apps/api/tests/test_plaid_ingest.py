@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg_pool import ConnectionPool
 
+from finance_api import plaid_probe
 from finance_api.app import app_from_env, create_app
 from finance_api.auth import IdTokenVerifier
 from finance_api.plaid import PlaidClient
@@ -479,3 +480,86 @@ def test_configuration_naming_another_plaid_host_is_refused_at_start(
 
     with pytest.raises(ValueError, match=r"sandbox\.plaid\.com"):
         app_from_env()
+
+
+CUSTOM_USER = {"override_accounts": [{"type": "depository"}] * 4}
+
+
+def _no_wait(seconds: float) -> None:
+    pass
+
+
+def test_probe_reads_a_seeded_item_back_and_prints_no_credential(plaid: FakePlaid) -> None:
+    report = plaid_probe.probe(plaid.client(), CUSTOM_USER, pause=_no_wait)
+
+    assert report["seed"] == "ok"
+    assert (report["accounts"]["count"], report["accounts"]["configured"]) == (4, 4)
+    assert report["transactions"] == {
+        "count": 3,
+        "attempts": 1,
+        "without_category": 1,
+        "pending": 1,
+    }
+    assert report["liabilities"] == {"credit": 1, "mortgage": 0, "student": 1}
+    assert report["holdings"] == {"count": 1, "securities": 1}
+    assert report["spending_demo_ready"] is True
+    printed = json.dumps(report)
+    for secret in (plaid.access_token, plaid.item_id, plaid.public_token, PLAID_SECRET):
+        assert secret not in printed
+
+
+def test_probe_waits_for_transactions_that_are_not_ready_at_once(plaid: FakePlaid) -> None:
+    ready = plaid.pages[""]
+    plaid.pages[""] = plaid.nothing_new("")
+    waits: list[float] = []
+
+    def wait(seconds: float) -> None:
+        waits.append(seconds)
+        if len(waits) == 2:
+            plaid.pages[""] = ready
+
+    report = plaid_probe.probe(plaid.client(), CUSTOM_USER, pause=wait)
+
+    assert (report["transactions"]["count"], report["transactions"]["attempts"]) == (3, 3)
+    assert report["spending_demo_ready"] is True
+
+
+def test_probe_gives_up_when_no_transaction_ever_arrives(plaid: FakePlaid) -> None:
+    plaid.pages[""] = plaid.nothing_new("")
+
+    report = plaid_probe.probe(plaid.client(), CUSTOM_USER, pause=_no_wait, attempts=3)
+
+    assert (report["transactions"]["count"], report["transactions"]["attempts"]) == (0, 3)
+    assert report["spending_demo_ready"] is False
+
+
+def test_probe_names_plaids_error_for_a_step_that_fails_and_goes_on(plaid: FakePlaid) -> None:
+    plaid.failing = "/liabilities/get"
+
+    report = plaid_probe.probe(plaid.client(), CUSTOM_USER, pause=_no_wait)
+
+    assert report["liabilities"] == {"error": "INTERNAL_SERVER_ERROR"}
+    assert report["holdings"] == {"count": 1, "securities": 1}
+    assert report["spending_demo_ready"] is True
+
+
+def test_probe_stops_at_a_seed_that_plaid_refuses(plaid: FakePlaid) -> None:
+    plaid.failing = "/sandbox/public_token/create"
+
+    report = plaid_probe.probe(plaid.client(), CUSTOM_USER, pause=_no_wait)
+
+    assert report == {"seed": {"error": "INTERNAL_SERVER_ERROR"}, "spending_demo_ready": False}
+
+
+def test_probe_command_prints_the_report_and_exits_by_readiness(
+    plaid: FakePlaid, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(plaid_probe, "plaid_client_from_env", plaid.client)
+
+    status = plaid_probe.main()
+
+    printed = capsys.readouterr().out
+    assert status == 0
+    assert json.loads(printed)["spending_demo_ready"] is True
+    assert json.loads(printed)["accounts"]["configured"] == 6
+    assert plaid.access_token not in printed
