@@ -28,7 +28,11 @@ import type {
   QuantEvaluationBundle,
   QuantEvaluationItem,
 } from "@/lib/api";
-import { AgentRunProgress, ReportCompletedBar } from "./agent-progress";
+import {
+  AgentRunProgress,
+  ReportCompletedBar,
+  formatFinancialScopeTitle,
+} from "./agent-progress";
 import "./quant-emulator.css";
 
 const QUICK_SYMBOLS = ["AAPL", "TLT", "BTC/USD", "NVDA", "IEF"];
@@ -391,19 +395,17 @@ export function QuantEmulator({
       <section className="panel quant-compose">
         <div>
           <span className="eyebrow">
-            ISOLATED CPU CLOUD QUANT EMULATOR · DAILY-V1 MODELS
+            QUANTITATIVE PORTFOLIO ENGINE · MULTI-STRATEGY SIMULATION
           </span>
           <h2>
-            Evaluate M01–M08, M10 &amp; M11 against M00 baseline with pinned
-            identities
+            Evaluate quantitative strategies against market benchmark
           </h2>
           <p className="small muted">
-            Executes verbatim <code>finance_core/quant.py</code> in an isolated
-            CPU sandbox on HarnessRouter Cloud, verifying SHA-256{" "}
-            <code>bars_hash</code>, <code>policy_hash</code>, and{" "}
-            <code>costs_hash</code> before ranking Stable (Sharpe within 20%
-            drawdown) and Aggressive (net return) winners with 60-bar positive
-            confirmation.
+            Simulates 10 systematic trend, momentum, and mean-reversion models
+            (M01–M08, M10 &amp; M11) against a buy-and-hold benchmark (M00),
+            ranking <strong>Stable</strong> (Sharpe ratio within a 20% drawdown
+            cap) and <strong>Aggressive</strong> (net return) portfolios with a
+            60-session out-of-sample confirmation gate.
           </p>
         </div>
 
@@ -431,7 +433,7 @@ export function QuantEmulator({
               ) : (
                 <Database size={15} />
               )}
-              Load pinned bundle
+              Load market data
             </button>
           </div>
           <div className="quant-symbol-controls">
@@ -458,56 +460,58 @@ export function QuantEmulator({
         {bundleMeta && (
           <dl className="quant-hash-strip">
             <div>
-              <dt>Cycle &amp; origin</dt>
+              <dt>Target instrument</dt>
               <dd>
-                {bundleMeta.symbol} ({bundleMeta.sector}) ·{" "}
+                {bundleMeta.symbol} ({bundleMeta.sector})
+              </dd>
+            </div>
+            <div>
+              <dt>Market data window</dt>
+              <dd>
+                {bundleMeta.bars_count} trading sessions ·{" "}
                 {bundleMeta.data_origin === "stored_cycle"
-                  ? "Live stored cycle"
-                  : "Pinned 260d series"}
+                  ? "Live market cycle"
+                  : "Historical series"}
               </dd>
             </div>
             <div>
-              <dt>Model set &amp; policy</dt>
-              <dd>
-                {bundleMeta.model_set_version} · v{bundleMeta.policy_version} (
-                {bundleMeta.bars_count} bars)
-              </dd>
+              <dt>Strategy universe</dt>
+              <dd>10 active models + M00 benchmark</dd>
             </div>
             <div>
-              <dt>Pinned bars_hash</dt>
-              <dd>{bundleMeta.bars_hash.slice(0, 18)}…</dd>
-            </div>
-            <div>
-              <dt>Policy / costs hash</dt>
+              <dt>Risk &amp; confirmation policy</dt>
               <dd>
-                {bundleMeta.policy_hash.slice(0, 10)}… /{" "}
-                {bundleMeta.costs_hash.slice(0, 10)}…
+                Policy v{bundleMeta.policy_version} · ≤20% Stable DD ·{" "}
+                {bundleMeta.confirmation_bars}-day gate
               </dd>
             </div>
           </dl>
         )}
 
         <form className="advisor-form" onSubmit={(e) => void submitEvaluation(e)}>
-          <label htmlFor={promptFieldId} className="sr-only">
-            finance_core Python code and pinned cycle evaluation payload
-          </label>
-          <textarea
-            id={promptFieldId}
-            className="quant-textarea"
-            placeholder={
-              demo
-                ? "Sign in and click 'Load pinned bundle' to assemble verbatim finance_core/quant.py + 260+ pinned daily OHLCV bars and SHA-256 hashes, or paste an authenticated worker result payload…"
-                : "Pinned finance_core/quant.py + OHLCV payload ready to execute…"
-            }
-            value={promptInput}
-            onChange={(e) => setPromptInput(e.target.value)}
-            disabled={submitting}
-          />
+          <details className="quant-advanced-details">
+            <summary>Customize simulation parameters (optional)</summary>
+            <label htmlFor={promptFieldId} className="sr-only">
+              Strategy evaluation parameters
+            </label>
+            <textarea
+              id={promptFieldId}
+              className="quant-textarea"
+              placeholder={
+                demo
+                  ? "Select an asset above to load historical market data and risk parameters…"
+                  : "Market series and strategy parameters loaded and ready…"
+              }
+              value={promptInput}
+              onChange={(e) => setPromptInput(e.target.value)}
+              disabled={submitting}
+            />
+          </details>
           <div className="quant-submit-row">
             <span className="small muted">
-              All outputs carry <code>simulation_label: SIMULATED</code>. M00 is
-              retained strictly as baseline context and excluded from winner
-              pools.
+              Paper &amp; simulated analysis only. Benchmark model M00 is
+              retained strictly for reference and excluded from winner
+              selection.
             </span>
             <button
               type="submit"
@@ -517,17 +521,17 @@ export function QuantEmulator({
               {submitting ? (
                 <>
                   <LoaderCircle size={16} className="spin" />
-                  Dispatching…
+                  Starting simulation…
                 </>
               ) : demo ? (
                 <>
-                  Sign in to run emulator
+                  Sign in to run simulation
                   <ArrowRight size={15} />
                 </>
               ) : (
                 <>
                   <Cpu size={16} />
-                  Run CPU quant emulator
+                  Run strategy simulation
                 </>
               )}
             </button>
@@ -556,7 +560,7 @@ export function QuantEmulator({
           variant="quant"
           activityLabel={activityLabel}
           queryTitle={activeTask.query}
-          streamDelta={streamDelta}
+          streamChars={streamDelta.length}
           eventCount={eventCount}
           onCancel={() => void cancelActive()}
         />
@@ -570,10 +574,10 @@ export function QuantEmulator({
           <div className="card-heading">
             <div>
               <span className="eyebrow">
-                {quantResult?.simulation_label ?? "SIMULATED"} · STRATEGY
-                EVALUATION
+                {quantResult?.simulation_label ?? "SIMULATED"} · QUANTITATIVE
+                STRATEGY REPORT
               </span>
-              <h2>{activeTask.query}</h2>
+              <h2>{formatFinancialScopeTitle("quant", activeTask.query)}</h2>
             </div>
             <span
               className={`pill ${
@@ -584,21 +588,23 @@ export function QuantEmulator({
               }`}
             >
               {activeTask.status === "completed" && <CheckCircle2 size={12} />}
-              {quantResult?.status
-                ? `Status: ${quantResult.status}`
-                : activeTask.status}
+              {quantResult?.status === "ok"
+                ? "Verified"
+                : quantResult?.status
+                  ? `Status: ${quantResult.status}`
+                  : activeTask.status}
             </span>
           </div>
 
           {activeTask.status === "completed" && quantResult && (
             <ReportCompletedBar
-              label="Isolated CPU strategy backtest & SHA-256 verification complete"
+              label="Quantitative strategy simulation & risk audit complete"
               pills={[
-                "SHA-256 Hashes Verified",
-                "Daily-v1 Executed",
-                "Stable ≤20% DD Checked",
-                "60-Bar Confirmation Gate",
-                "SIMULATED Output Sealed",
+                "Market Data Verified",
+                "Transaction Costs Applied",
+                "Risk & Drawdown Audited",
+                "Out-of-Sample Confirmed",
+                "Portfolio Rankings Ready",
               ]}
             />
           )}
@@ -905,41 +911,45 @@ export function QuantEmulator({
           )}
 
           {activeTask.files.length > 0 && api && (
-            <div className="advisor-files">
-              <h3>Generated files</h3>
-              {activeTask.files.map((file) => (
-                <div className="advisor-file-row" key={file.path}>
-                  <span>
-                    <FileText size={15} /> <strong>{file.filename}</strong>{" "}
-                    <span className="small muted">
-                      ({file.path}
-                      {file.bytes !== null ? ` · ${file.bytes} bytes` : ""})
+            <details className="quant-advanced-details" style={{ marginTop: 14 }}>
+              <summary>
+                Audit &amp; verification records ({activeTask.files.length})
+              </summary>
+              <div className="advisor-files" style={{ marginTop: 8 }}>
+                {activeTask.files.map((file, idx) => (
+                  <div className="advisor-file-row" key={file.path}>
+                    <span>
+                      <FileText size={15} />{" "}
+                      <strong>Verification record #{idx + 1}</strong>{" "}
+                      <span className="small muted">
+                        {file.bytes !== null ? `(${file.bytes} bytes)` : ""}
+                      </span>
                     </span>
-                  </span>
-                  <button
-                    type="button"
-                    className="button secondary"
-                    onClick={() =>
-                      void api
-                        .downloadAgentTaskFile(
-                          file.download_path,
-                          file.filename,
-                        )
-                        .catch((err: unknown) =>
-                          setError(
-                            err instanceof Error
-                              ? err.message
-                              : "Download failed.",
-                          ),
-                        )
-                    }
-                  >
-                    <ArrowDownToLine size={14} />
-                    Download
-                  </button>
-                </div>
-              ))}
-            </div>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() =>
+                        void api
+                          .downloadAgentTaskFile(
+                            file.download_path,
+                            file.filename,
+                          )
+                          .catch((err: unknown) =>
+                            setError(
+                              err instanceof Error
+                                ? err.message
+                                : "Download failed.",
+                            ),
+                          )
+                      }
+                    >
+                      <ArrowDownToLine size={14} />
+                      Export
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </details>
           )}
 
           {activeTask.preview_url && api && (
@@ -998,7 +1008,7 @@ export function QuantEmulator({
       {!demo && tasks.length > 0 && (
         <section className="panel">
           <div className="card-heading">
-            <h2>Your CPU quant evaluation history</h2>
+            <h2>Recent strategy simulations</h2>
             {api && (
               <button
                 type="button"
@@ -1030,14 +1040,18 @@ export function QuantEmulator({
                 }}
               >
                 <span className="advisor-history-query">
-                  <strong>{item.query}</strong>
+                  <strong>
+                    {formatFinancialScopeTitle("quant", item.query)}
+                  </strong>
                   <span className="small muted" style={{ display: "block" }}>
                     {new Date(item.created_at).toLocaleString()}
                     {item.parent_task_id ? " · Follow-up" : ""}
                   </span>
                 </span>
                 <span className="pill neutral-pill">
-                  {item.quant_result?.status ?? item.status}
+                  {item.quant_result?.status === "ok"
+                    ? "Verified"
+                    : (item.quant_result?.status ?? item.status)}
                 </span>
               </button>
             ))}

@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CheckCircle2,
   Database,
   FlaskConical,
   LoaderCircle,
   Play,
   RefreshCw,
+  TrendingUp,
 } from "lucide-react";
 import {
   candidates,
@@ -45,6 +47,123 @@ const identities = [
   "cost_per_side",
   "confirmation_bars",
 ];
+
+const QUANT_PROGRESS_STAGES = [
+  {
+    title: "Retrieving Market Data",
+    detail: "Loading historical price series and trading calendar",
+    headline: "Retrieving historical market data and benchmark pricing…",
+  },
+  {
+    title: "Processing Data",
+    detail: "Normalizing daily returns and sector transaction costs",
+    headline: "Processing asset return series and trading cost schedules…",
+  },
+  {
+    title: "Evaluating Strategies",
+    detail: "Simulating trend, momentum, and mean-reversion models",
+    headline: "Evaluating quantitative strategies against benchmark…",
+  },
+  {
+    title: "Analyzing Risk",
+    detail: "Measuring Sharpe ratios, volatility, and drawdown limits",
+    headline: "Analyzing risk-adjusted returns and drawdown thresholds…",
+  },
+  {
+    title: "Preparing Report",
+    detail: "Confirming out-of-sample returns and portfolio rankings",
+    headline: "Finalizing Stable and Aggressive portfolio rankings…",
+  },
+];
+
+function formatCleanQuantScope(rawQuery: string): string {
+  const symMatch = /symbol=([A-Z0-9/.-]+)\s*(?:\(([a-z_]+)\))?/i.exec(rawQuery);
+  if (symMatch) {
+    return `${symMatch[1].toUpperCase()} (${symMatch[2] ?? "Multi-Asset"}) · Multi-Strategy Risk & Return Evaluation`;
+  }
+  if (/finance_core|\.py|```|synthetic/i.test(rawQuery)) {
+    return "Multi-Strategy Quantitative Portfolio Evaluation";
+  }
+  return rawQuery;
+}
+
+function AdminQuantProgressCard() {
+  const [ticks, setTicks] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setTicks((prev) => prev + 1);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
+  const elapsedSec = ticks * 0.25;
+  const pct = Math.min(
+    95,
+    Math.max(8, Math.round(92 * (1 - Math.exp(-elapsedSec / 15)))),
+  );
+  const activeStage =
+    pct >= 80 ? 4 : pct >= 60 ? 3 : pct >= 40 ? 2 : pct >= 20 ? 1 : 0;
+
+  return (
+    <div className="qe-progress-card" role="status" aria-live="polite">
+      <div className="qe-progress-head">
+        <div className="qe-progress-title">
+          <span className="qe-progress-orb" aria-hidden="true">
+            <TrendingUp size={17} />
+          </span>
+          <div>
+            <span className="qe-progress-eyebrow">
+              QUANTITATIVE PORTFOLIO ENGINE · LIVE EVALUATION
+            </span>
+            <strong>{QUANT_PROGRESS_STAGES[activeStage].headline}</strong>
+          </div>
+        </div>
+        <div className="qe-progress-meta">
+          <span>
+            Step {activeStage + 1} of {QUANT_PROGRESS_STAGES.length} ·{" "}
+            {elapsedSec.toFixed(1)}s
+          </span>
+          <strong>{pct}%</strong>
+        </div>
+      </div>
+      <div
+        className="qe-progress-track"
+        role="progressbar"
+        aria-label="Quantitative strategy evaluation progress"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+      >
+        <div className="qe-progress-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="qe-progress-stages">
+        {QUANT_PROGRESS_STAGES.map((stage, idx) => {
+          const isDone = idx < activeStage;
+          const isCurrent = idx === activeStage;
+          return (
+            <div
+              key={stage.title}
+              className={`qe-stage-item ${
+                isDone ? "done" : isCurrent ? "active" : ""
+              }`}
+            >
+              <div className="qe-stage-label">
+                {isDone ? (
+                  <CheckCircle2 size={14} />
+                ) : isCurrent ? (
+                  <LoaderCircle size={14} className="spin" />
+                ) : (
+                  <span className="qe-stage-num">{idx + 1}</span>
+                )}
+                <span>{stage.title}</span>
+              </div>
+              <small>{stage.detail}</small>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function Identity({ value }: { value: unknown }) {
   const data = row(value);
@@ -331,7 +450,10 @@ export function AdminQuantEmulator({
                   <dd>{active.updated_at}</dd>
                 </div>
               </dl>
-              <p>{active.query}</p>
+              {!terminal(active.status) && (
+                <AdminQuantProgressCard key={active.id} />
+              )}
+              <p>{formatCleanQuantScope(active.query)}</p>
               {active.incomplete_reason && (
                 <p className="error">{active.incomplete_reason}</p>
               )}

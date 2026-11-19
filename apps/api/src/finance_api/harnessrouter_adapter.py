@@ -158,11 +158,11 @@ def to_progress(ev: Json) -> Json | None:
         if item.get("type") == "function_call":
             fn_name = str(item.get("name") or "").lower()
             if re.search(r"write|edit|patch", fn_name):
-                label = "Writing files"
+                label = "Structuring financial analysis"
             elif re.search(r"read|grep|glob|ls", fn_name):
-                label = "Reading files"
+                label = "Retrieving financial data"
             elif re.search(r"bash|shell|exec|terminal|python", fn_name):
-                label = "Running isolated verification step"
+                label = "Evaluating financial models"
             elif re.search(r"search|fetch|browse|web|http", fn_name):
                 label = "Checking authoritative public sources"
             else:

@@ -880,7 +880,7 @@ export function FinanceAdvisor({
           variant="advisor"
           activityLabel={activityLabel}
           queryTitle={summarizeQueryTitle(activeTask.query)}
-          streamDelta={streamDelta}
+          streamChars={streamDelta.length}
           eventCount={eventCount}
           onCancel={() => void cancelActive()}
         />
@@ -941,14 +941,14 @@ export function FinanceAdvisor({
 
           {activeTask.files.length > 0 && api && (
             <div className="advisor-files">
-              <h3>Generated files</h3>
-              {activeTask.files.map((file) => (
+              <h3>Supporting analysis documents</h3>
+              {activeTask.files.map((file, idx) => (
                 <div className="advisor-file-row" key={file.path}>
                   <span>
-                    <FileText size={15} /> <strong>{file.filename}</strong>{" "}
+                    <FileText size={15} />{" "}
+                    <strong>Financial Schedule #{idx + 1}</strong>{" "}
                     <span className="small muted">
-                      ({file.path}
-                      {file.bytes !== null ? ` · ${file.bytes} bytes` : ""})
+                      {file.bytes !== null ? `(${file.bytes} bytes)` : ""}
                     </span>
                   </span>
                   <button

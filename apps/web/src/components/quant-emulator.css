@@ -218,6 +218,24 @@
   background: #f3f8f5;
 }
 
+.quant-advanced-details {
+  border: 1px solid #dde3d8;
+  border-radius: 12px;
+  padding: 9px 13px;
+  background: #fafbf9;
+}
+
+.quant-advanced-details summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #2f3b32;
+}
+
+.quant-advanced-details .quant-textarea {
+  margin-top: 10px;
+}
+
 @media (max-width: 720px) {
   .quant-followup-form {
     flex-direction: column;

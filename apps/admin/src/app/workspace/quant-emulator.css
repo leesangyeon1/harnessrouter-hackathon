@@ -116,6 +116,108 @@
   padding: 14px;
   font-size: 12px;
 }
+.qe-progress-card {
+  border: 1px solid #cfe0d5;
+  background: linear-gradient(180deg, #ffffff 0%, #f6faf7 100%);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin: 14px 0;
+  display: grid;
+  gap: 12px;
+}
+.qe-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.qe-progress-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.qe-progress-orb {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #e7f3ec;
+  color: #164b34;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qe-progress-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #164b34;
+}
+.qe-progress-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: #2f4336;
+}
+.qe-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #e4ece6;
+  overflow: hidden;
+}
+.qe-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #18543a 0%, #2f8f65 100%);
+  transition: width 0.4s ease;
+}
+.qe-progress-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+.qe-stage-item {
+  border: 1px solid #e0e6df;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #fafbf9;
+  display: grid;
+  gap: 3px;
+}
+.qe-stage-item.done {
+  background: #eef6f1;
+  border-color: #c2dccb;
+}
+.qe-stage-item.active {
+  background: #ffffff;
+  border-color: #1f6a4a;
+}
+.qe-stage-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1f2e24;
+}
+.qe-stage-num {
+  width: 17px;
+  height: 17px;
+  border-radius: 999px;
+  background: #e5ebe6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+}
+.qe-stage-item small {
+  font-size: 10px;
+  color: #4f6356;
+  line-height: 1.35;
+}
 @media (max-width: 1000px) {
   .qe-columns {
     grid-template-columns: 1fr;
