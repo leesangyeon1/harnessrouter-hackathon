@@ -27,6 +27,7 @@ TENANT_TABLES = [
     "fills",
 ]
 SHARED_TABLES = [
+    "advisor_demo_scenarios",  # Owner4e7f6f26: global, read-only synthetic comparison seed.
     "assets",
     "bond_etf_list",
     "cycles",

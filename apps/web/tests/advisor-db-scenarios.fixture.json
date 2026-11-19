@@ -1,0 +1,171 @@
+{
+  "seed_version": "advisor-db-demo-v1",
+  "scenarios": [
+    {
+      "schema": "harness.advisor.db-context.v1",
+      "scenario_id": "balance-transfer",
+      "scenario_version": "advisor-db-demo-v1",
+      "data_origin": "seeded_synthetic_db",
+      "synthetic": true,
+      "currency": "USD",
+      "comparison": {
+        "label": "24.49% Card vs. 0% 15-mo Balance Transfer",
+        "kind": "card",
+        "goal": "Minimize total interest and fees while keeping my monthly payment at $200.00/month.",
+        "normalized_inputs_and_option_terms": {
+          "balanceUsd": 2387.65,
+          "currentAprPct": 24.49,
+          "monthlyPaymentUsd": 200,
+          "transferFeePct": 3,
+          "promoAprPct": 0,
+          "promoMonths": 15,
+          "postPromoAprPct": 21.99
+        }
+      },
+      "calculator_evidence": {
+        "version": "monthly-cents-v1",
+        "status": "verified_by_app_calculator",
+        "verification_scope": "Deterministic fixture checks; not lender verification or live account readback.",
+        "source": "Versioned Harness synthetic comparison calculator",
+        "assumptions": [
+          "Fixed monthly payment, interest rounded to cents monthly.",
+          "Transfer fee is added to the balance; no new purchases or annual fees.",
+          "Promo duration starts at the comparison date, not a known calendar expiration."
+        ],
+        "outputs": {
+          "optionCurrent": {
+            "payable": true,
+            "months": 14,
+            "upfrontFeeUsd": "$0.00",
+            "totalInterestUsd": "$376.98",
+            "totalCostUsd": "$2,764.63",
+            "remainingAtPromoEndUsd": "$2,387.65"
+          },
+          "optionTransfer": {
+            "payable": true,
+            "months": 13,
+            "upfrontFeeUsd": "$71.63",
+            "totalInterestUsd": "$0.00",
+            "totalCostUsd": "$2,459.28",
+            "remainingAtPromoEndUsd": "$0.00"
+          },
+          "netCostSavingsUsd": "$305.35"
+        }
+      },
+      "limitations": [
+        "Synthetic demonstration data, not user financial records or live offers.",
+        "Analyze this selected comparison independently; other scenario presets are alternatives, not simultaneous loans.",
+        "Income, actual affordability, eligibility and real promotional expiration dates are unknown.",
+        "No memory or workspace files are needed for this bounded comparison."
+      ]
+    },
+    {
+      "schema": "harness.advisor.db-context.v1",
+      "scenario_id": "refinance-term-tradeoff",
+      "scenario_version": "advisor-db-demo-v1",
+      "data_origin": "seeded_synthetic_db",
+      "synthetic": true,
+      "currency": "USD",
+      "comparison": {
+        "label": "Loan Refinance: 60-mo Lower Payment vs. Total Cost",
+        "kind": "refinance",
+        "goal": "Understand whether lowering my monthly cash outflow by extending to 60 months actually saves or costs more in total interest and fees.",
+        "normalized_inputs_and_option_terms": {
+          "principalUsd": 18500,
+          "currentAprPct": 6.8,
+          "remainingMonths": 36,
+          "newAprPct": 5.75,
+          "newTermMonths": 60,
+          "refiFeeUsd": 250
+        }
+      },
+      "calculator_evidence": {
+        "version": "monthly-cents-v1",
+        "status": "verified_by_app_calculator",
+        "verification_scope": "Deterministic fixture checks; not lender verification or live account readback.",
+        "source": "Versioned Harness synthetic comparison calculator",
+        "assumptions": [
+          "USD fixed-rate monthly amortization.",
+          "Monthly payment rounded to cents; total scheduled payments are rounded payment times term.",
+          "Refinance fee paid upfront; no other closing costs or prepayment penalty assumed."
+        ],
+        "outputs": {
+          "currentLoan": {
+            "monthlyPaymentUsd": "$569.54",
+            "totalInterestUsd": "$2,003.44",
+            "upfrontFeeUsd": "$0.00",
+            "totalOutOfPocketUsd": "$20,503.44"
+          },
+          "refiOffer": {
+            "monthlyPaymentUsd": "$355.51",
+            "totalInterestUsd": "$2,830.60",
+            "upfrontFeeUsd": "$250.00",
+            "totalOutOfPocketUsd": "$21,580.60"
+          },
+          "monthlyPaymentDeltaUsd": "-$214.03",
+          "netTotalSavingsUsd": "-$1,077.16"
+        }
+      },
+      "limitations": [
+        "Synthetic demonstration data, not user financial records or live offers.",
+        "Analyze this selected comparison independently; other scenario presets are alternatives, not simultaneous loans.",
+        "Income, actual affordability, eligibility and real promotional expiration dates are unknown.",
+        "No memory or workspace files are needed for this bounded comparison."
+      ]
+    },
+    {
+      "schema": "harness.advisor.db-context.v1",
+      "scenario_id": "refinance-same-term",
+      "scenario_version": "advisor-db-demo-v1",
+      "data_origin": "seeded_synthetic_db",
+      "synthetic": true,
+      "currency": "USD",
+      "comparison": {
+        "label": "Loan Refinance: 6.80% vs. 5.10% Same 48-mo Term",
+        "kind": "refinance",
+        "goal": "Lower both my monthly payment and my total lifetime cost without extending my payoff date.",
+        "normalized_inputs_and_option_terms": {
+          "principalUsd": 18500,
+          "currentAprPct": 6.8,
+          "remainingMonths": 48,
+          "newAprPct": 5.1,
+          "newTermMonths": 48,
+          "refiFeeUsd": 185
+        }
+      },
+      "calculator_evidence": {
+        "version": "monthly-cents-v1",
+        "status": "verified_by_app_calculator",
+        "verification_scope": "Deterministic fixture checks; not lender verification or live account readback.",
+        "source": "Versioned Harness synthetic comparison calculator",
+        "assumptions": [
+          "USD fixed-rate monthly amortization.",
+          "Monthly payment rounded to cents; total scheduled payments are rounded payment times term.",
+          "Refinance fee paid upfront; no other closing costs or prepayment penalty assumed."
+        ],
+        "outputs": {
+          "currentLoan": {
+            "monthlyPaymentUsd": "$441.29",
+            "totalInterestUsd": "$2,681.92",
+            "upfrontFeeUsd": "$0.00",
+            "totalOutOfPocketUsd": "$21,181.92"
+          },
+          "refiOffer": {
+            "monthlyPaymentUsd": "$426.88",
+            "totalInterestUsd": "$1,990.24",
+            "upfrontFeeUsd": "$185.00",
+            "totalOutOfPocketUsd": "$20,675.24"
+          },
+          "monthlyPaymentDeltaUsd": "-$14.41",
+          "netTotalSavingsUsd": "$506.68"
+        }
+      },
+      "limitations": [
+        "Synthetic demonstration data, not user financial records or live offers.",
+        "Analyze this selected comparison independently; other scenario presets are alternatives, not simultaneous loans.",
+        "Income, actual affordability, eligibility and real promotional expiration dates are unknown.",
+        "No memory or workspace files are needed for this bounded comparison."
+      ]
+    }
+  ]
+}

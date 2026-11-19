@@ -38,6 +38,7 @@ from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
 import finance_core.quant as fc_quant
+from finance_api.advisor_demo_db import AdvisorContextSelection, analysis_input, read_scenario
 from finance_api.auth import current_user
 from finance_api.db import tenant_transaction
 from finance_api.harnessrouter_adapter import (
@@ -99,6 +100,7 @@ class CreateAgentTaskRequest(BaseModel):
     input: str = Field(min_length=1, max_length=250_000)
     feature_key: FeatureKey | None = None
     follow_up_task_id: UUID | None = None
+    advisor_context: AdvisorContextSelection | None = None
 
 
 def _resolve_feature_key(raw_kind: Any) -> FeatureKey:
@@ -549,6 +551,18 @@ def _fetch_owned_task(pool: ConnectionPool, user_id: str, task_id: UUID) -> dict
     return row
 
 
+@router.get("/advisor-context")
+def stored_advisor_context(
+    request: Request,
+    user_id: User,
+    scenario_id: Annotated[str, Query(min_length=1, max_length=80)] = "balance-transfer",
+) -> dict[str, Any]:
+    """Retrieve an immutable synthetic DB record, without account or provider access."""
+    pool: ConnectionPool = request.app.state.pool
+    with tenant_transaction(pool, user_id) as conn:
+        return read_scenario(conn, scenario_id)
+
+
 @router.get("/quant-bundle")
 def build_quant_evaluation_bundle(
     request: Request,
@@ -677,6 +691,17 @@ def create_agent_task(
     resolved_feature: FeatureKey = payload.feature_key or "advisor"
 
     with tenant_transaction(pool, user_id) as conn, conn.cursor(row_factory=dict_row) as cur:
+        if payload.advisor_context is not None:
+            if resolved_feature != "advisor" or parent_id is not None:
+                raise HTTPException(422, "A DB scenario applies only to a new advisor analysis.")
+            selected = payload.advisor_context
+            snapshot = read_scenario(conn, selected.scenario_id)
+            if (
+                selected.scenario_version != snapshot["payload"]["scenario_version"]
+                or selected.sha256 != snapshot["sha256"]
+            ):
+                raise HTTPException(409, "The stored scenario changed. Reload it before analyzing.")
+            cleaned_input = analysis_input(cleaned_input, snapshot)
         if parent_id is not None:
             parent = cur.execute(
                 "SELECT id, kind, status, harness_task_id, session_id"

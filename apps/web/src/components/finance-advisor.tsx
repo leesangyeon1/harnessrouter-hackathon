@@ -24,13 +24,11 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import type { AgentTask, FinanceApi } from "@/lib/api";
+import { ApiError, type AgentTask, type FinanceApi } from "@/lib/api";
 import {
-  advisorContextPath,
-  advisorWebRequest,
-  validAdvisorSnapshot,
-  type AdvisorSnapshot,
-} from "@/lib/advisor-context";
+  advisorDbSelection,
+  type AdvisorDbSnapshot,
+} from "@/lib/advisor-db-context";
 import {
   ADVISOR_PRESETS,
   computeBalanceTransferComparison,
@@ -253,9 +251,8 @@ export function FinanceAdvisor({
   const [promptInput, setPromptInput] = useState("");
   const [useSampleContext, setUseSampleContext] = useState(true);
   const [sampleId, setSampleId] = useState("balance-transfer");
-  const [sampleSnapshot, setSampleSnapshot] = useState<AdvisorSnapshot | null>(
-    null,
-  );
+  const [sampleSnapshot, setSampleSnapshot] =
+    useState<AdvisorDbSnapshot | null>(null);
   const [sampleError, setSampleError] = useState("");
   const [sampleReload, setSampleReload] = useState(0);
   const [followUpInput, setFollowUpInput] = useState("");
@@ -290,30 +287,18 @@ export function FinanceAdvisor({
   const streamAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    const abort = new AbortController();
-    void fetch(`${advisorContextPath(sampleId)}/snapshot.json`, {
-      cache: "no-store",
-      credentials: "omit",
-      redirect: "error",
-      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]),
-    })
-      .then(async (response) => {
-        if (!response.ok)
-          throw new Error(
-            "The sample webpage is unavailable. Retry before analyzing.",
-          );
-        const snapshot: unknown = await response.json();
-        if (!validAdvisorSnapshot(snapshot, sampleId))
-          throw new Error(
-            "The sample context changed or could not be read. Reload the page before analyzing.",
-          );
-        if (!abort.signal.aborted) {
+    let cancelled = false;
+    if (!api || demo || !useSampleContext) return;
+    void api
+      .advisorContext(sampleId)
+      .then((snapshot) => {
+        if (!cancelled) {
           setSampleSnapshot(snapshot);
           setSampleError("");
         }
       })
       .catch((caught) => {
-        if (!abort.signal.aborted) {
+        if (!cancelled) {
           setSampleSnapshot(null);
           setSampleError(
             caught instanceof Error
@@ -322,8 +307,10 @@ export function FinanceAdvisor({
           );
         }
       });
-    return () => abort.abort();
-  }, [sampleId, sampleReload]);
+    return () => {
+      cancelled = true;
+    };
+  }, [api, demo, useSampleContext, sampleId, sampleReload]);
 
   const cardCalcPreview = useMemo(
     () =>
@@ -453,18 +440,28 @@ export function FinanceAdvisor({
     setSubmitting(true);
     setError(null);
     try {
-      const request =
-        useSampleContext && sampleSnapshot
-          ? advisorWebRequest(trimmed, sampleSnapshot, window.location.origin)
-          : trimmed;
-      const created = await api.startAgentTask(request, {
+      const created = await api.startAgentTask(trimmed, {
         featureKey: "advisor",
+        ...(useSampleContext && sampleSnapshot
+          ? { advisorContext: advisorDbSelection(sampleSnapshot) }
+          : {}),
       });
       setPromptInput("");
       setActiveTask(created);
       upsertTaskList(created);
       void watchTask(api, created);
     } catch (caught) {
+      if (
+        useSampleContext &&
+        caught instanceof ApiError &&
+        caught.status === 409
+      ) {
+        setSampleSnapshot(null);
+        setSampleError(
+          "The stored scenario changed. Reload the database context and review it before submitting again.",
+        );
+        return;
+      }
       setError(
         caught instanceof Error
           ? caught.message
@@ -534,7 +531,7 @@ export function FinanceAdvisor({
             <p className="small muted">
               Analyze normalized balances, APRs, fees, and verified calculator
               outputs—distinguishing lower monthly payments from lower total
-              lifetime costs, with private per-user memory across sessions.
+              lifetime costs, with saved comparisons in your workspace.
             </p>
           </div>
           <div className="advisor-badges">
@@ -858,15 +855,19 @@ export function FinanceAdvisor({
 
         <section
           className="advisor-context-card"
-          aria-label="Webpage data for new analyses"
+          aria-label="Database scenario for new analyses"
         >
           <label className="advisor-context-toggle">
             <input
               type="checkbox"
               checked={useSampleContext}
-              onChange={(event) => setUseSampleContext(event.target.checked)}
+              onChange={(event) => {
+                setSampleSnapshot(null);
+                setSampleError("");
+                setUseSampleContext(event.target.checked);
+              }}
             />
-            Use sample webpage data in new analyses
+            Use stored synthetic demo data in new analyses
           </label>
           {useSampleContext ? (
             <>
@@ -893,8 +894,9 @@ export function FinanceAdvisor({
                 Only the selected synthetic scenario, its goal/options and
                 deterministic calculator evidence are included. These are
                 demonstration figures, not your account data or real offers. The
-                agent must read the linked page; webpage access is not verified
-                merely by sending this request.
+                server retrieves the selected database record again before
+                analysis. No webpage reading or agent database credentials are
+                needed.
               </p>
               {sampleSnapshot && (
                 <>
@@ -906,15 +908,15 @@ export function FinanceAdvisor({
                   <p className="small">
                     Goal: {sampleSnapshot.payload.comparison.goal}
                   </p>
-                  <a
-                    href={`${advisorContextPath(sampleId)}?sha=${sampleSnapshot.sha256}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    View the exact sample webpage and calculator results
-                  </a>
+                  <p className="small">
+                    Source: seeded synthetic database · Seed{" "}
+                    {sampleSnapshot.storage.seed_version}
+                    {" · "}Record {sampleSnapshot.storage.record_id}
+                  </p>
                   <details>
-                    <summary>Snapshot identity and figures</summary>
+                    <summary>
+                      Stored snapshot identity and calculator figures
+                    </summary>
                     <p className="small advisor-context-hash">
                       SHA-256: {sampleSnapshot.sha256}
                     </p>
@@ -935,7 +937,11 @@ export function FinanceAdvisor({
                 </>
               )}
               {!sampleSnapshot && !sampleError && (
-                <p role="status">Loading sample webpage context…</p>
+                <p role="status">
+                  {api && !demo
+                    ? "Loading stored synthetic scenario…"
+                    : "Open your connected workspace to retrieve the stored scenario. No bank connection is required."}
+                </p>
               )}
               {sampleError && (
                 <p role="alert">
@@ -948,7 +954,7 @@ export function FinanceAdvisor({
                       setSampleReload((value) => value + 1);
                     }}
                   >
-                    Retry sample context
+                    Reload database context
                   </button>
                 </p>
               )}
@@ -956,7 +962,7 @@ export function FinanceAdvisor({
           ) : (
             <p className="small muted">
               Custom comparison: only the inputs and verified calculator results
-              you provide will be sent. No sample webpage context is attached.
+              you provide will be sent. No database scenario is attached.
             </p>
           )}
         </section>
@@ -999,7 +1005,7 @@ export function FinanceAdvisor({
               disabled={
                 submitting ||
                 (!demo && !promptInput.trim()) ||
-                (useSampleContext && !sampleSnapshot)
+                (!demo && useSampleContext && !sampleSnapshot)
               }
             >
               {submitting ? (

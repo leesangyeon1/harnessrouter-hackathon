@@ -1,4 +1,9 @@
 import { parseCycle, type LatestCycle } from "./cycles";
+import {
+  parseAdvisorDbSnapshot,
+  type AdvisorDbSelection,
+  type AdvisorDbSnapshot,
+} from "./advisor-db-context";
 export type SpendingLine = { month: string; category: string; amount: string };
 export type SpendingReport = {
   id: string;
@@ -52,7 +57,8 @@ export type QuantEvaluationItem = {
   symbol?: string | null;
   pinned_identities?: Record<string, unknown> | null;
   baseline?: Record<string, unknown> | null;
-  candidate_metrics?: Record<string, unknown>[] | Record<string, unknown> | null;
+  candidate_metrics?:
+    Record<string, unknown>[] | Record<string, unknown> | null;
   stable_winner?: string | null;
   aggressive_winner?: string | null;
   reasons?: Record<string, unknown> | unknown[] | string | null;
@@ -448,17 +454,37 @@ export class FinanceApi {
     options?: {
       featureKey?: AgentFeatureKey;
       followUpTaskId?: string;
+      advisorContext?: AdvisorDbSelection;
     },
   ): Promise<AgentTask> {
-    const payload: Record<string, string> = { input };
+    const payload: Record<string, unknown> = { input };
     if (options?.featureKey) payload.feature_key = options.featureKey;
     if (options?.followUpTaskId)
       payload.follow_up_task_id = options.followUpTaskId;
+    if (options?.advisorContext)
+      payload.advisor_context = options.advisorContext;
     return (await this.request(
       "/v1/agent-tasks",
       "POST",
       payload,
     )) as AgentTask;
+  }
+  async advisorContext(scenarioId: string): Promise<AdvisorDbSnapshot> {
+    try {
+      return await parseAdvisorDbSnapshot(
+        await this.request(
+          `/v1/agent-tasks/advisor-context?scenario_id=${encodeURIComponent(scenarioId)}`,
+        ),
+        scenarioId,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404)
+        throw new ApiError(
+          404,
+          "The stored synthetic scenario is unavailable. Its database seed may be missing; retry before analyzing.",
+        );
+      throw error;
+    }
   }
   async listAgentTasks(featureKey?: AgentFeatureKey): Promise<AgentTask[]> {
     const suffix = featureKey

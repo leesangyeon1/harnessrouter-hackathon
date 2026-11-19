@@ -1,5 +1,22 @@
 // Local-only transport fixture. Never imported by either application.
 import http from "node:http";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+const dbFixture = JSON.parse(
+  readFileSync(
+    new URL("./advisor-db-scenarios.fixture.json", import.meta.url),
+    "utf8",
+  ),
+);
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object")
+    return `{${Object.entries(value)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+      .join(",")}}`;
+  return JSON.stringify(value);
+}
 let role = "admin";
 let scenario = "report";
 let cycleScenario = "ready";
@@ -207,6 +224,29 @@ const server = http.createServer(async (req, res) => {
       pinned_identities: quantPins,
       available_cycle_symbols: [],
     });
+    return;
+  }
+  if (path === "/v1/agent-tasks/advisor-context") {
+    const id = new URL(req.url, "http://127.0.0.1:4319").searchParams.get(
+      "scenario_id",
+    );
+    const payload = dbFixture.scenarios.find((item) => item.scenario_id === id);
+    send(
+      payload
+        ? {
+            payload,
+            sha256: createHash("sha256")
+              .update(canonical(payload))
+              .digest("hex"),
+            storage: {
+              kind: "postgresql",
+              seed_version: dbFixture.seed_version,
+              record_id: `fixture-${id}`,
+            },
+          }
+        : { detail: "missing synthetic fixture" },
+      payload ? 200 : 404,
+    );
     return;
   }
   if (path === "/v1/agent-tasks" && req.method === "POST") {
