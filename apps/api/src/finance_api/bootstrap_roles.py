@@ -30,23 +30,22 @@ def ensure_runtime_login_role(
     exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (login_name,)).fetchone()
     if exists is None:
         conn.execute(
-            sql.SQL(
-                "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB"
-            ).format(sql.Identifier(login_name), sql.Literal(password))
+            sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(
+                sql.Identifier(login_name), sql.Literal(password)
+            )
         )
     else:
-        # Non-superuser CREATEROLE roles in PostgreSQL 16 cannot specify [NO]SUPERUSER
-        # or [NO]BYPASSRLS in ALTER ROLE; verify they remain false instead.
         conn.execute(
-            sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {} NOCREATEROLE NOCREATEDB").format(
+            sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {}").format(
                 sql.Identifier(login_name), sql.Literal(password)
             )
         )
     flags = conn.execute(
-        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = %s",
+        "SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb"
+        " FROM pg_roles WHERE rolname = %s",
         (login_name,),
     ).fetchone()
-    if flags != (False, False):
+    if flags != (False, False, False, False):
         raise RuntimeError(f"runtime login role {login_name} has unsafe privilege flags {flags}")
     conn.execute(
         sql.SQL("GRANT {} TO {}").format(sql.Identifier(group_role), sql.Identifier(login_name))
