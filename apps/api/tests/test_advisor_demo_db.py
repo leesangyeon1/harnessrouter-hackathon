@@ -13,13 +13,19 @@ import pytest
 from fastapi.testclient import TestClient
 from psycopg.types.json import Jsonb
 
-from finance_api.advisor_demo_db import canonical_json
+from finance_api.advisor_demo_db import analysis_input, canonical_json
 from finance_api.app import create_app
 from finance_api.auth import IdTokenVerifier
 from finance_api.db import create_pool
 from finance_api.harnessrouter_adapter import HarnessRouter
 from finance_api.plaid import PlaidClient
 from finance_api.sealing import SecretBox
+
+
+def test_db_prompt_exposes_stored_goal_for_the_customer_report_heading() -> None:
+    snapshot = {"payload": {"comparison": {"goal": "Minimize total interest and fees."}}}
+    prompt = analysis_input("Compare the stored scenario.", snapshot)
+    assert "User comparison goal: Minimize total interest and fees." in prompt
 
 
 @pytest.fixture

@@ -170,6 +170,7 @@ def analysis_input(question: str, snapshot: dict[str, Any]) -> str:
         [
             "Caller authorization: Analyze this selected synthetic demonstration DB scenario.",
             "The server queried the seeded PostgreSQL record and verified its identity.",
+            f"User comparison goal: {snapshot['payload']['comparison']['goal']}",
             "Use the stored inputs, comparison goal, option terms and calculator outputs below.",
             "Calculator verification is deterministic, not lender or live-account verification.",
             "Do not read a webpage, execute SQL or request database/account credentials.",
