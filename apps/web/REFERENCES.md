@@ -1,0 +1,13 @@
+# Official frontend reference brief
+
+The room's Research Expert checked these public references on November 18, 2026. Rocket Money sources are public marketing mockups and help pages, not an authenticated current-release UI audit. One budget mockup contains a 2024 date; its sample totals are not financial evidence. Harness uses original fixtures, branding, SVGs and styling.
+
+- [Rocket Money homepage](https://www.rocketmoney.com/), [Budget](https://www.rocketmoney.com/feature/create-a-budget), and [Net Worth](https://www.rocketmoney.com/feature/net-worth): mobile examples show light rounded cards, prominent balances, secondary labels, line/area charts, progress indicators and aligned account rows. These support an approachable hierarchy, not exact copied color or spacing tokens.
+- [Creating a Budget](https://help.rocketmoney.com/en/articles/2649810-creating-a-budget) identifies left-side desktop navigation. It does not establish a complete desktop design specification. Harness adapts that navigation and card hierarchy into its own coral/neutral system and separate operations app.
+- [Next.js standalone output](https://nextjs.org/docs/app/api-reference/config/next-config-js/output): standalone server packaging requires copying static/public assets separately. The supplied Dockerfiles do this for each app.
+- [Cloud Run Next.js guide](https://docs.cloud.google.com/run/docs/quickstarts/frameworks/deploy-nextjs-service) and [container contract](https://docs.cloud.google.com/run/docs/container-contract): services listen on `0.0.0.0` and the injected `PORT`. These references are not proof that our images were built or deployed.
+- [Firebase web email/password](https://firebase.google.com/docs/auth/web/password-auth) and [Identity Platform email/password](https://docs.cloud.google.com/identity-platform/docs/sign-in-user-email): configure the provider and use the modular browser SDK.
+- [Firebase JavaScript auth reference](https://firebase.google.com/docs/reference/js/auth): `getIdToken` returns a valid cached token or refreshes when needed. `onIdTokenChanged` observes refresh events; token expiration alone does not trigger it. Request-time token acquisition is needed for reliable long-lived sessions.
+- [Verify ID tokens](https://firebase.google.com/docs/auth/admin/verify-id-tokens) and [session management](https://firebase.google.com/docs/auth/admin/manage-sessions): the backend verifies Firebase ID tokens and separately authorizes actions. These tokens are distinct from Cloud Run IAM invocation credentials.
+
+No private assets, user account data, credentials or code were uploaded for this research. Provider and deployed environment verification remain separate work.

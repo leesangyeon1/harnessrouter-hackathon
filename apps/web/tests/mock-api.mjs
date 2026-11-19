@@ -47,19 +47,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const token = req.headers.authorization?.replace("Bearer ", "");
+  let adminToken = token === "admin-fixture";
+  // Synthetic JWT identity only; this local fixture does not verify signatures.
+  try {
+    adminToken ||=
+      JSON.parse(
+        Buffer.from(token?.split(".")[1] ?? "", "base64url").toString(),
+      ).sub === "fixture-admin";
+  } catch {}
   if (!token) {
     send({ detail: "sign-in required" }, 401);
     return;
   }
   if (path === "/v1/me") {
     send({
-      user_id: token === "admin-fixture" ? "fixture-admin" : "fixture-customer",
-      role: token === "admin-fixture" ? role : "user",
+      user_id: adminToken ? "fixture-admin" : "fixture-customer",
+      role: adminToken ? role : "user",
     });
     return;
   }
   if (path.startsWith("/v1/admin/")) {
-    if (token !== "admin-fixture" || role !== "admin") {
+    if (!adminToken || role !== "admin") {
       send({ detail: "admin required" }, 403);
       return;
     }

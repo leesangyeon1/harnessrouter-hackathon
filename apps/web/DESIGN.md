@@ -9,3 +9,5 @@ Target captures: 1440×1000 desktop and 390×844 mobile. Automated axe checks co
 Content states remain distinct. Synthetic preview is always labelled. Loading preserves context; an empty spending report offers connection; provider failures offer retry; partial live data shows unknowns rather than sample figures. Successful reads show the report's calculation time. Operations denies access at the server when roles are unavailable or removed. Missing backend surfaces explain availability without inventing a numerical result or enabling privileged actions.
 
 See [`evidence/report.json`](evidence/report.json) and its rendered screenshots for observations. Financial figures in these captures come only from synthetic preview data or local HTTP fixtures.
+
+The delegated [official reference brief](REFERENCES.md) records the public design/auth/hosting sources and their limits. Rocket Money marketing images do not establish a verified current desktop release or supply our fixtures.

@@ -3,11 +3,49 @@ import AxeBuilder from "@axe-core/playwright";
 const api = "http://127.0.0.1:4319";
 const admin = "http://127.0.0.1:3101";
 
-async function mockIdentity(page: Page) {
+test("admin renews an expired server cookie from the current browser identity before an action", async ({
+  page,
+  context,
+}) => {
+  await page.request.post(`${api}/__test__/reset`, { data: {} });
+  await mockIdentity(page, "admin");
+  await page.goto(admin);
+  await page.getByLabel("Email address").fill("admin@example.com");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page
+    .getByRole("button", { name: "Open operations", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Keep things moving." }),
+  ).toBeVisible();
+  // Let initial sign-in and page hydration settle before simulating idle expiry.
+  // Next development streaming keeps the global network-idle state open.
+  await page.waitForTimeout(1000);
+  // Simulate the 50-minute cookie expiring without changing Firebase identity.
+  await context.clearCookies({ name: "harness_admin_session" });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await expect
+    .poll(async () =>
+      (await context.cookies(admin)).some(
+        (cookie) => cookie.name === "harness_admin_session",
+      ),
+    )
+    .toBe(true);
+  await expect(
+    page.getByRole("heading", { name: "Keep things moving." }),
+  ).toBeVisible();
+});
+
+async function mockIdentity(
+  page: Page,
+  role: "customer" | "admin" = "customer",
+) {
+  const identityId = `fixture-${role}`;
+  const email = `${role}@example.com`;
   const now = Math.floor(Date.now() / 1000);
   const encode = (value: object) =>
     Buffer.from(JSON.stringify(value)).toString("base64url");
-  const token = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({ sub: "fixture-customer", user_id: "fixture-customer", aud: "harness-test", iss: "https://securetoken.google.com/harness-test", iat: now, exp: now + 3600, auth_time: now, email: "customer@example.com", firebase: { sign_in_provider: "password", identities: { email: ["customer@example.com"] } } })}.fixture-signature`;
+  const token = `${encode({ alg: "RS256", typ: "JWT" })}.${encode({ sub: identityId, user_id: identityId, aud: "harness-test", iss: "https://securetoken.google.com/harness-test", iat: now, exp: now + 3600, auth_time: now, email, firebase: { sign_in_provider: "password", identities: { email: [email] } } })}.fixture-signature`;
   await page.route(
     "https://identitytoolkit.googleapis.com/**",
     async (route) => {
@@ -20,22 +58,22 @@ async function mockIdentity(page: Page) {
             ? {
                 users: [
                   {
-                    localId: "fixture-customer",
-                    email: "customer@example.com",
+                    localId: identityId,
+                    email,
                     emailVerified: true,
                     providerUserInfo: [
                       {
                         providerId: "password",
-                        email: "customer@example.com",
-                        federatedId: "customer@example.com",
+                        email,
+                        federatedId: email,
                       },
                     ],
                   },
                 ],
               }
             : {
-                localId: "fixture-customer",
-                email: "customer@example.com",
+                localId: identityId,
+                email,
                 idToken: token,
                 refreshToken: "fixture-refresh",
                 expiresIn: "3600",
@@ -190,7 +228,11 @@ test("admin server rejects anonymous, non-admin and cross-origin mutation reques
     ).status(),
   ).toBe(403);
   await page.goto(admin);
-  await page.screenshot({ path: "evidence/admin-signin.png", fullPage: true });
+  await page.screenshot({
+    path: "evidence/admin-signin.png",
+    fullPage: true,
+    caret: "initial",
+  });
 });
 test("admin issues a one-time credential, revokes it, and immediately loses access after role removal", async ({
   page,

@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { onIdTokenChanged, signOut } from "firebase/auth";
+import { signOut } from "firebase/auth";
 import {
   Activity,
   ArrowLeft,
@@ -23,6 +23,14 @@ import {
   X,
 } from "lucide-react";
 import { adminAuth, configured } from "@/lib/firebase";
+import { sessionRequest } from "@/lib/session";
+const operationRequest = (path: string, init: RequestInit = {}) =>
+  sessionRequest(path, init, async () => {
+    if (!configured()) return null;
+    const auth = await adminAuth();
+    await auth.authStateReady();
+    return auth.currentUser ? auth.currentUser.getIdToken() : null;
+  });
 type Token = { id: string; created_at: string; revoked_at: string | null };
 type Section = "workers" | "cycles" | "policies" | "usage";
 const stamp = (value: string) =>
@@ -49,7 +57,7 @@ export function Operations({
     setLoading(true);
     setError("");
     try {
-      const response = await fetch("/api/worker-tokens", {
+      const response = await operationRequest("/api/worker-tokens", {
         cache: "no-store",
         redirect: "error",
       });
@@ -79,42 +87,6 @@ export function Operations({
     }
   }, [router]);
   useEffect(() => {
-    if (!configured()) return;
-    let stop: (() => void) | undefined;
-    let active = true;
-    void adminAuth()
-      .then((auth) => {
-        if (!active) return;
-        stop = onIdTokenChanged(auth, (account) => {
-          if (account)
-            void account
-              .getIdToken()
-              .then((token) =>
-                fetch("/api/session", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ token }),
-                  cache: "no-store",
-                }),
-              )
-              .then((response) => {
-                if (response.status === 401 || response.status === 403) {
-                  router.replace("/");
-                  router.refresh();
-                }
-              })
-              .catch(() => {
-                /* The next request still re-verifies the server session. */
-              });
-        });
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-      stop?.();
-    };
-  }, [router]);
-  useEffect(() => {
     if (confirm) modal.current?.showModal();
     else modal.current?.close();
   }, [confirm]);
@@ -125,7 +97,7 @@ export function Operations({
     setError("");
     setNotice("");
     try {
-      const response = await fetch(
+      const response = await operationRequest(
         confirm === "new"
           ? "/api/worker-tokens"
           : `/api/worker-tokens/${encodeURIComponent(confirm)}`,
@@ -220,7 +192,7 @@ export function Operations({
               <ExternalLink size={12} />
             </a>
           )}
-          <button onClick={() => void logout()}>
+          <button disabled={busy || loading} onClick={() => void logout()}>
             <LogOut size={15} />
             Sign out
           </button>

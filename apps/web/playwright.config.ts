@@ -36,6 +36,9 @@ export default defineConfig({
       env: {
         INTERNAL_API_BASE_URL: "http://127.0.0.1:4319",
         ADMIN_APP_ORIGIN: "http://127.0.0.1:3101",
+        NEXT_PUBLIC_IDENTITY_PROJECT_ID: "harness-test",
+        NEXT_PUBLIC_FIREBASE_API_KEY: "local-test-public-key",
+        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: "harness-test.firebaseapp.com",
       },
     },
   ],
