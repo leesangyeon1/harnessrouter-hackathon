@@ -246,3 +246,75 @@ def test_service_built_from_the_environment_verifies_tokens(
         response = client.get("/v1/me")
 
     assert response.status_code == 401
+
+
+def test_open_guest_session_isolates_customers_and_cannot_access_admin(
+    client: TestClient,
+) -> None:
+    guest_a = client.post("/v1/auth/guest").json()
+    guest_b = client.post("/v1/auth/guest").json()
+
+    assert guest_a["user_id"].startswith("guest_")
+    assert guest_b["user_id"].startswith("guest_")
+    assert guest_a["user_id"] != guest_b["user_id"]
+    assert guest_a["role"] == "user"
+
+    # Renewing with previous_token preserves the visitor's guest user_id.
+    renewed_a = client.post("/v1/auth/guest", json={"previous_token": guest_a["token"]}).json()
+    assert renewed_a["user_id"] == guest_a["user_id"]
+
+    me_a = client.get("/v1/me", headers=_bearer(guest_a["token"]))
+    assert me_a.status_code == 200
+    assert me_a.json() == {"user_id": guest_a["user_id"], "role": "user"}
+
+    # Guests cannot access administrator routes.
+    assert client.get(ADMIN_ACTION, headers=_bearer(guest_a["token"])).status_code == 403
+    assert client.post(ADMIN_ACTION, headers=_bearer(guest_a["token"])).status_code == 403
+
+
+def test_local_admin_credentials_authenticate_admin_and_reject_bad_passwords(
+    client: TestClient,
+) -> None:
+    bad_pw = client.post(
+        "/v1/auth/admin-login",
+        json={"username": "admin", "password": "wrong-password"},
+    )
+    assert bad_pw.status_code == 401
+
+    bad_id = client.post(
+        "/v1/auth/admin-login",
+        json={"username": "intruder", "password": "quantmaster@2"},
+    )
+    assert bad_id.status_code == 401
+
+    good = client.post(
+        "/v1/auth/admin-login",
+        json={"username": "admin", "password": "quantmaster@2"},
+    )
+    assert good.status_code == 200
+    body = good.json()
+    assert body["user_id"] == "ops-admin"
+    assert body["role"] == "admin"
+
+    me = client.get("/v1/me", headers=_bearer(body["token"]))
+    assert me.status_code == 200
+    assert me.json() == {"user_id": "ops-admin", "role": "admin"}
+
+    listed = client.get(ADMIN_ACTION, headers=_bearer(body["token"]))
+    assert listed.status_code == 200
+
+    # Forged HS256 token signed with a different key is refused with 401.
+    forged_hs256 = jwt.encode(
+        {
+            "sub": "ops-admin",
+            "session_kind": "local_admin",
+            "iss": f"urn:harness-finance:{PROJECT}",
+            "aud": PROJECT,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+        },
+        b"wrong-secret-key-32-bytes-000000",
+        algorithm="HS256",
+        headers={"kid": "local-hs256-v1", "typ": "JWT"},
+    )
+    assert client.get("/v1/me", headers=_bearer(forged_hs256)).status_code == 401

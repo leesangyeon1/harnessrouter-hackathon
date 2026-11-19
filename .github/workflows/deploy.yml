@@ -464,6 +464,16 @@ jobs:
           API_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/me")"
           test "${API_UNAUTH}" = "401"
 
+          GUEST_TOKEN="$(curl -fsS -X POST "${API_URL}/v1/auth/guest" -H 'Content-Type: application/json' -d '{}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+          GUEST_ME="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${GUEST_TOKEN}" "${API_URL}/v1/me")"
+          test "${GUEST_ME}" = "200"
+
+          GUEST_ADMIN_DENY="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${GUEST_TOKEN}" "${API_URL}/v1/admin/worker-tokens")"
+          test "${GUEST_ADMIN_DENY}" = "403"
+
+          BAD_ADMIN_LOGIN="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${API_URL}/v1/auth/admin-login" -H 'Content-Type: application/json' -d '{"username":"admin","password":"invalid"}')"
+          test "${BAD_ADMIN_LOGIN}" = "401"
+
           WORKER_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${WORKER_URL}/internal/tasks/harness")"
           test "${WORKER_UNAUTH}" = "401" -o "${WORKER_UNAUTH}" = "403"
 

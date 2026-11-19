@@ -16,7 +16,15 @@ from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
 from finance_api import admin_performance, agent_search, cycles, plaid_ingest, reports
-from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
+from finance_api.auth import (
+    JWKS_URL,
+    IdTokenVerifier,
+    create_public_auth_app,
+    current_role,
+    current_user,
+    derive_session_signing_key,
+    require_admin,
+)
 from finance_api.db import create_pool
 from finance_api.harnessrouter_adapter import HarnessRouter, load_api_key, preview_secret
 from finance_api.health import create_health_app
@@ -86,6 +94,8 @@ def create_app(
     app.state.harness_router = harness_router
     p_key = preview_signing_key or preview_secret()
     app.state.preview_signing_key = p_key
+    auth_key = derive_session_signing_key(p_key)
+    app.state.auth_signing_key = auth_key
 
     def _swap_plaid(new_client_id: str, new_secret: str) -> None:
         app.state.plaid = PlaidClient(new_client_id, new_secret, httpx.Client(timeout=30))
@@ -181,6 +191,7 @@ def create_app(
     app.mount("/health", create_health_app(pool))
     app.mount("/worker/v1", create_worker_app(pool))
     app.mount("/admin-secrets", console_app)
+    app.mount("/v1/auth", create_public_auth_app(auth_key, verifier.project_id))
     app.mount(
         "/v1/agent-preview",
         agent_search.create_agent_preview_app(

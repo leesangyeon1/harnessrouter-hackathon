@@ -209,6 +209,102 @@ export class ApiError extends Error {
   }
 }
 
+type StoredGuestSession = {
+  token: string;
+  user_id: string;
+  expires_at: number;
+};
+
+const GUEST_STORAGE_KEY = "harness_guest_session_v1";
+let memoryGuestSession: StoredGuestSession | null = null;
+let inflightGuestPromise: Promise<string> | null = null;
+
+function readStoredGuestSession(): StoredGuestSession | null {
+  if (typeof window !== "undefined") {
+    try {
+      const raw = window.localStorage.getItem(GUEST_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<StoredGuestSession>;
+        if (
+          typeof parsed.token === "string" &&
+          typeof parsed.user_id === "string" &&
+          typeof parsed.expires_at === "number"
+        ) {
+          return parsed as StoredGuestSession;
+        }
+      }
+    } catch {
+      /* fall back to in-memory session */
+    }
+  }
+  return memoryGuestSession;
+}
+
+function writeStoredGuestSession(session: StoredGuestSession): void {
+  memoryGuestSession = session;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(session));
+    } catch {
+      /* keep in-memory session */
+    }
+  }
+}
+
+export async function fetchGuestToken(
+  rawOrigin: string,
+  transport: typeof fetch = fetch,
+): Promise<string> {
+  const origin = apiOrigin(rawOrigin);
+  const existing = readStoredGuestSession();
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (existing && existing.expires_at - nowSec > 300) {
+    return existing.token;
+  }
+  if (inflightGuestPromise) return inflightGuestPromise;
+
+  inflightGuestPromise = (async () => {
+    try {
+      const response = await transport(`${origin}/v1/auth/guest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          existing?.token ? { previous_token: existing.token } : {},
+        ),
+        credentials: "omit",
+        cache: "no-store",
+        redirect: "error",
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) {
+        throw new ApiError(
+          response.status,
+          "Could not start an open guest workspace session.",
+        );
+      }
+      const data = (await response.json()) as Partial<StoredGuestSession>;
+      if (
+        typeof data.token !== "string" ||
+        typeof data.user_id !== "string" ||
+        typeof data.expires_at !== "number"
+      ) {
+        throw new ApiError(502, "Guest session response could not be read.");
+      }
+      const session: StoredGuestSession = {
+        token: data.token,
+        user_id: data.user_id,
+        expires_at: data.expires_at,
+      };
+      writeStoredGuestSession(session);
+      return session.token;
+    } finally {
+      inflightGuestPromise = null;
+    }
+  })();
+
+  return inflightGuestPromise;
+}
+
 export class FinanceApi {
   private origin: string;
   constructor(

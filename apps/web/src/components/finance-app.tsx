@@ -59,6 +59,7 @@ import {
   ApiError,
   FinanceApi,
   categoryName,
+  fetchGuestToken,
   money,
   monthName,
   summarize,
@@ -323,6 +324,7 @@ export function FinanceApp() {
   const [toast, setToast] = useState("");
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("all");
+  const [liveDiscovery, setLiveDiscovery] = useState(false);
   const [mode, setMode] = useState<"stable" | "aggressive">("stable");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const sequence = useRef(0);
@@ -364,6 +366,15 @@ export function FinanceApp() {
       ),
     [],
   );
+  const guestClient = useCallback(() => {
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
+    if (!base) return null;
+    try {
+      return new FinanceApi(base, () => fetchGuestToken(base));
+    } catch {
+      return null;
+    }
+  }, []);
   const refresh = useCallback(
     async (account: User) => {
       const current = ++sequence.current;
@@ -396,13 +407,13 @@ export function FinanceApp() {
     },
     [client],
   );
-  const loadCycle = useCallback(
-    async () => (user ? client(user).latestCycle() : null),
-    [client, user],
-  );
   const verifierApi = useMemo(
-    () => (user ? client(user) : null),
-    [client, user],
+    () => (user ? client(user) : guestClient()),
+    [client, guestClient, user],
+  );
+  const loadCycle = useCallback(
+    async () => (verifierApi ? verifierApi.latestCycle() : null),
+    [verifierApi],
   );
 
   useEffect(() => {
@@ -471,7 +482,7 @@ export function FinanceApp() {
     setDialog("connect");
   }
   async function connectSandbox() {
-    if (!user) {
+    if (!verifierApi) {
       setDialog("auth");
       return;
     }
@@ -479,7 +490,7 @@ export function FinanceApp() {
     setBusy(true);
     setError(null);
     try {
-      const api = client(user);
+      const api = verifierApi;
       try {
         await api.seed();
       } catch (caught) {
@@ -522,7 +533,7 @@ export function FinanceApp() {
     }
   }
   async function sync() {
-    if (demo || !user) {
+    if (demo || !verifierApi) {
       connect();
       return;
     }
@@ -530,7 +541,7 @@ export function FinanceApp() {
     setBusy(true);
     setError(null);
     try {
-      const api = client(user);
+      const api = verifierApi;
       const synced = await api.sync();
       if (sequence.current !== current) return;
       setCounts(synced);
@@ -820,7 +831,7 @@ export function FinanceApp() {
               view === "verifier" ||
               view === "advisor" ||
               view === "quant" ? (
-                demo ? (
+                !verifierApi && demo ? (
                   <button
                     className="button primary"
                     key="cycle-signin"
@@ -838,12 +849,12 @@ export function FinanceApp() {
                 ) : (
                   <span className="pill neutral-pill">
                     {view === "verifier"
-                      ? "Read-only public lookup"
+                      ? "Open access · Public lookup"
                       : view === "advisor"
-                        ? "Per-user advisor memory"
+                        ? "Open access · Per-visitor memory"
                         : view === "quant"
-                          ? "Isolated CPU simulation"
-                          : "Read-only screen"}
+                          ? "Open access · Isolated CPU simulation"
+                          : "Open access · Live cycle"}
                   </span>
                 )
               ) : (
@@ -922,7 +933,7 @@ export function FinanceApp() {
             <>
               <FinanceAdvisor
                 api={verifierApi}
-                demo={demo}
+                demo={!verifierApi}
                 onRequireSignIn={() => setDialog("auth")}
               />
               <div className="overview-top-grid">
@@ -1797,11 +1808,21 @@ export function FinanceApp() {
                     </button>
                   ))}
                 </div>
-                <span className="muted small">
-                  {demo ? "Sample cycle · Nov 17, 2026" : "Latest stored cycle"}
-                </span>
+                {verifierApi && demo ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    onClick={() => setLiveDiscovery((prev) => !prev)}
+                  >
+                    {liveDiscovery ? "View sample watchlist" : "Load live stored cycle"}
+                  </button>
+                ) : (
+                  <span className="muted small">
+                    {demo ? "Sample cycle · Nov 17, 2026" : "Latest stored cycle"}
+                  </span>
+                )}
               </div>
-              {demo ? (
+              {demo && !liveDiscovery ? (
                 <section className="panel table-panel">
                   <div className="card-heading">
                     <div>
@@ -1920,7 +1941,7 @@ export function FinanceApp() {
           {view === "advisor" && (
             <FinanceAdvisor
               api={verifierApi}
-              demo={demo}
+              demo={!verifierApi}
               onRequireSignIn={() => setDialog("auth")}
             />
           )}
@@ -1928,7 +1949,7 @@ export function FinanceApp() {
           {view === "quant" && (
             <QuantEmulator
               api={verifierApi}
-              demo={demo}
+              demo={!verifierApi}
               onRequireSignIn={() => setDialog("auth")}
             />
           )}
@@ -1936,7 +1957,7 @@ export function FinanceApp() {
           {view === "verifier" && (
             <TickerVerifier
               api={verifierApi}
-              demo={demo}
+              demo={!verifierApi}
               onRequireSignIn={() => setDialog("auth")}
             />
           )}
@@ -1959,8 +1980,14 @@ export function FinanceApp() {
                   </strong>
                 </div>
                 <div className="setting-row">
-                  <span>Email</span>
-                  <strong>{user?.email ?? "Not signed in"}</strong>
+                  <span>Access mode</span>
+                  <strong>
+                    {user
+                      ? user.email ?? "Signed-in account"
+                      : verifierApi
+                        ? "Open guest access (active — no sign-in required)"
+                        : "Sample preview"}
+                  </strong>
                 </div>
                 <div className="setting-row">
                   <span>Data source</span>
@@ -2130,7 +2157,7 @@ export function FinanceApp() {
               </>
             ) : (
               <>
-                {user ? "Connect Sandbox profile" : "Sign in and connect"}
+                {verifierApi ? "Connect Sandbox profile" : "Sign in and connect"}
                 <ArrowRight size={17} />
               </>
             )}

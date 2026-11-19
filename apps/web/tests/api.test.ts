@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   FinanceApi,
   ApiError,
+  fetchGuestToken,
   parseReport,
   summarize,
   toCents,
@@ -148,4 +149,24 @@ test("sync refuses unknown readiness and malformed availability rather than defa
       (error: unknown) => error instanceof ApiError && error.status === 502,
     );
   }
+});
+
+test("guest session token is minted once and cached for open customer access", async () => {
+  let posts = 0;
+  const transport: typeof fetch = async (url, init) => {
+    posts++;
+    assert.equal(String(url), "https://api.example.com/v1/auth/guest");
+    assert.equal(init?.method, "POST");
+    return Response.json({
+      token: "guest-jwt-123",
+      user_id: "guest_abc123",
+      role: "user",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+    });
+  };
+  const first = await fetchGuestToken("https://api.example.com", transport);
+  const second = await fetchGuestToken("https://api.example.com", transport);
+  assert.equal(first, "guest-jwt-123");
+  assert.equal(second, "guest-jwt-123");
+  assert.equal(posts, 1);
 });
