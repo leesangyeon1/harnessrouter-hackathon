@@ -6,7 +6,20 @@ let cycleScenario = "ready";
 let syncScenario = "ready";
 let quantStarts = 0;
 let quantTasks = [];
-const quantPins = { cycle_id: "sample-AAPL", symbol: "AAPL", sector: "stock", data_origin: "synthetic_pinned_260d", model_set_version: "daily-v1", policy_version: 1, bars_count: 260, bars_hash: "a".repeat(64), policy_hash: "b".repeat(64), costs_hash: "c".repeat(64), confirmation_bars: 60, cost_per_side: 0.001 };
+const quantPins = {
+  cycle_id: "sample-AAPL",
+  symbol: "AAPL",
+  sector: "stock",
+  data_origin: "synthetic_pinned_260d",
+  model_set_version: "daily-v1",
+  policy_version: 1,
+  bars_count: 260,
+  bars_hash: "a".repeat(64),
+  policy_hash: "b".repeat(64),
+  costs_hash: "c".repeat(64),
+  confirmation_bars: 60,
+  cost_per_side: 0.001,
+};
 // Synthetic local screen; no live market/provider data is used here.
 const stockCoverage = {
   provider_listed: 23,
@@ -142,7 +155,10 @@ const server = http.createServer(async (req, res) => {
       quantStarts = 0;
       quantTasks = [];
     }
-    if (path.endsWith("quant-stats")) { send({ starts: quantStarts }); return; }
+    if (path.endsWith("quant-stats")) {
+      send({ starts: quantStarts });
+      return;
+    }
     if (path.endsWith("role")) role = data.role;
     if (path.endsWith("scenario")) scenario = data.scenario;
     if (path.endsWith("cycle")) cycleScenario = data.scenario;
@@ -151,6 +167,21 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   const token = req.headers.authorization?.replace("Bearer ", "");
+  if (path === "/v1/auth/admin-login" && req.method === "POST") {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const credentials = JSON.parse(raw);
+    const valid =
+      credentials.username === "fixture-admin" &&
+      credentials.password === "fixture-password";
+    send(
+      valid
+        ? { token: "admin-fixture" }
+        : { detail: "Invalid fixture credentials" },
+      valid ? 200 : 401,
+    );
+    return;
+  }
   let adminToken = token === "admin-fixture";
   // Synthetic JWT identity only; this local fixture does not verify signatures.
   try {
@@ -170,18 +201,77 @@ const server = http.createServer(async (req, res) => {
     });
     return;
   }
-  if (path === "/v1/agent-tasks/quant-bundle") { send({ prompt: "synthetic pinned quant input", pinned_identities: quantPins, available_cycle_symbols: [] }); return; }
-  if (path === "/v1/agent-tasks" && req.method === "POST") {
-    let raw = ""; for await (const chunk of req) raw += chunk;
-    const input = JSON.parse(raw);
-    if (input.feature_key !== "quant_eval" || input.input !== "synthetic pinned quant input") { send({ detail: "invalid fixture input" }, 400); return; }
-    quantStarts++;
-    const result = { status: "ok", simulation_label: "SIMULATED_FIXTURE", evaluations: [{ cycle_id: "sample-AAPL", symbol: "AAPL", pinned_identities: quantPins, stable_winner: "M02", aggressive_winner: null, candidate_metrics: [{ model_id: "M02", selection: { net_return: 0.125, sharpe: 1.2, max_drawdown: 0.1 }, confirmation: { net_return: 0.02, sharpe: 0.8, max_drawdown: 0.03 } }] }], issues: [] };
-    const task = { id: "e5e4fe53-56f5-4390-9530-b32dc5e75dc3", feature_key: "quant_eval", status: "completed", query: "Synthetic sample evaluation", answer: scenario === "quant-unparsed" ? "Unparseable synthetic answer" : JSON.stringify(result), quant_result: scenario === "quant-unparsed" ? null : result, created_at: "2026-11-19T14:00:00Z", updated_at: "2026-11-19T14:00:01Z" };
-    quantTasks = [task]; send(task, 201); return;
+  if (path === "/v1/agent-tasks/quant-bundle") {
+    send({
+      prompt: "synthetic pinned quant input",
+      pinned_identities: quantPins,
+      available_cycle_symbols: [],
+    });
+    return;
   }
-  if (path === "/v1/agent-tasks") { send({ tasks: quantTasks }); return; }
-  if (path.startsWith("/v1/agent-tasks/")) { const task = quantTasks.find((item) => path.endsWith(item.id)); send(task ?? { detail: "not found" }, task ? 200 : 404); return; }
+  if (path === "/v1/agent-tasks" && req.method === "POST") {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    const input = JSON.parse(raw);
+    if (
+      input.feature_key !== "quant_eval" ||
+      input.input !== "synthetic pinned quant input"
+    ) {
+      send({ detail: "invalid fixture input" }, 400);
+      return;
+    }
+    quantStarts++;
+    const result = {
+      status: "ok",
+      simulation_label: "SIMULATED_FIXTURE",
+      evaluations: [
+        {
+          cycle_id: "sample-AAPL",
+          symbol: "AAPL",
+          pinned_identities: quantPins,
+          stable_winner: "M02",
+          aggressive_winner: null,
+          candidate_metrics: [
+            {
+              model_id: "M02",
+              selection: { net_return: 0.125, sharpe: 1.2, max_drawdown: 0.1 },
+              confirmation: {
+                net_return: 0.02,
+                sharpe: 0.8,
+                max_drawdown: 0.03,
+              },
+            },
+          ],
+        },
+      ],
+      issues: [],
+    };
+    const task = {
+      id: "e5e4fe53-56f5-4390-9530-b32dc5e75dc3",
+      feature_key: "quant_eval",
+      status: "completed",
+      query: "Synthetic sample evaluation",
+      answer:
+        scenario === "quant-unparsed"
+          ? "Unparseable synthetic answer"
+          : JSON.stringify(result),
+      quant_result: scenario === "quant-unparsed" ? null : result,
+      created_at: "2026-11-19T14:00:00Z",
+      updated_at: "2026-11-19T14:00:01Z",
+    };
+    quantTasks = [task];
+    send(task, 201);
+    return;
+  }
+  if (path === "/v1/agent-tasks") {
+    send({ tasks: quantTasks });
+    return;
+  }
+  if (path.startsWith("/v1/agent-tasks/")) {
+    const task = quantTasks.find((item) => path.endsWith(item.id));
+    send(task ?? { detail: "not found" }, task ? 200 : 404);
+    return;
+  }
   if (path.startsWith("/v1/admin/")) {
     if (!adminToken || role !== "admin") {
       send({ detail: "admin required" }, 403);

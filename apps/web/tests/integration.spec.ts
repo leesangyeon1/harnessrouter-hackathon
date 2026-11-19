@@ -3,37 +3,36 @@ import AxeBuilder from "@axe-core/playwright";
 const api = "http://127.0.0.1:4319";
 const admin = "http://127.0.0.1:3101";
 
-test("admin renews an expired server cookie from the current browser identity before an action", async ({
+test("expired admin-ID session blocks operations and requires sign-in", async ({
   page,
   context,
 }) => {
   await page.request.post(`${api}/__test__/reset`, { data: {} });
-  await mockIdentity(page, "admin");
   await page.goto(admin);
-  await page.getByLabel("Email address").fill("admin@example.com");
-  await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
+  await page.getByLabel("Admin ID").fill("fixture-admin");
+  await page.getByLabel("Password", { exact: true }).fill("fixture-password");
   await page
     .getByRole("button", { name: "Open operations", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Keep things moving." }),
   ).toBeVisible();
-  // Let initial sign-in and page hydration settle before simulating idle expiry.
-  // Next development streaming keeps the global network-idle state open.
-  await page.waitForTimeout(1000);
-  // Simulate the 50-minute cookie expiring without changing Firebase identity.
+  // The current ID/password flow has no Firebase browser identity to renew from.
   await context.clearCookies({ name: "harness_admin_session" });
+  expect(
+    (
+      await page.request.post(`${admin}/api/worker-tokens`, {
+        headers: { Origin: admin },
+      })
+    ).status(),
+  ).toBe(401);
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await expect
-    .poll(async () =>
-      (await context.cookies(admin)).some(
-        (cookie) => cookie.name === "harness_admin_session",
-      ),
-    )
-    .toBe(true);
-  await expect(
-    page.getByRole("heading", { name: "Keep things moving." }),
-  ).toBeVisible();
+  await expect(page.getByLabel("Admin ID")).toBeVisible();
+  expect(
+    (await context.cookies(admin)).some(
+      (cookie) => cookie.name === "harness_admin_session",
+    ),
+  ).toBe(false);
 });
 
 async function mockIdentity(
@@ -111,21 +110,12 @@ async function loginCustomer(
 ) {
   await mockIdentity(page);
   await page.goto("/");
-  if (entry === "discovery") {
-    await page
-      .locator(".sidebar")
-      .getByRole("button", { name: "Market discovery", exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: "Sign in for latest cycle", exact: true })
-      .click();
-  } else {
-    await page
-      .getByRole("button", { name: "Connect account", exact: true })
-      .first()
-      .click();
-    await page.getByRole("button", { name: "Sign in and connect" }).click();
-  }
+  await page
+    .getByRole("button", { name: "Open profile settings", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Sign in to your workspace", exact: true })
+    .click();
   await page.getByLabel("Email address").fill("customer@example.com");
   await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
   await page
@@ -133,6 +123,11 @@ async function loginCustomer(
     .getByRole("button", { name: "Sign in", exact: true })
     .click();
   await expect(page.locator(".workspace-badge")).toHaveText("Sandbox");
+  if (entry === "discovery")
+    await page
+      .locator(".sidebar")
+      .getByRole("button", { name: "Market discovery", exact: true })
+      .click();
 }
 
 test("published discovery preserves sector scope, coverage, precision and empty versus missing data", async ({

@@ -11,7 +11,7 @@ const luminance = (rgb: string) => {
     .map((n) => (n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4));
   return values[0] * 0.2126 + values[1] * 0.7152 + values[2] * 0.0722;
 };
-test("discovery sign-in keeps AA text contrast while navigation changes its controls", async ({
+test("discovery live-cycle control keeps AA text contrast while navigation changes its controls", async ({
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "no-preference" });
@@ -26,7 +26,7 @@ test("discovery sign-in keeps AA text contrast while navigation changes its cont
     .getByRole("button", { name: "Market discovery", exact: true })
     .click();
   const frames = await page
-    .getByRole("button", { name: "Sign in for latest cycle", exact: true })
+    .getByRole("button", { name: "Load live stored cycle", exact: true })
     .evaluate(async (node) => {
       const frames = [];
       for (let i = 0; i < 12; i++) {
