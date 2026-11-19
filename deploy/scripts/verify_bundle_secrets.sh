@@ -17,9 +17,9 @@ if [ "$#" -lt 1 ]; then
 fi
 
 if [ "$MODE" = "--frontend-bundle" ]; then
-  FORBIDDEN_REGEX='(PLAID_SECRET|SECRET_BOX_KEY|ALPACA_SECRET_KEY|APCA-API-SECRET-KEY|HARNESSROUTER_API_KEY|WORKER_TOKEN|access-sandbox-[A-Za-z0-9_-]+|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgresql://[^"[:space:]]+:[^"[:space:]]+@)'
+  FORBIDDEN_REGEX='(PLAID_SECRET|SECRET_BOX_KEY|ALPACA_SECRET_KEY|APCA-API-SECRET-KEY|HARNESSROUTER_API_KEY|TOKENROUTER_API_KEY|WORKER_TOKEN|sk-(hr-)?[A-Za-z0-9_-]{20,}|access-sandbox-[A-Za-z0-9_-]+|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|postgresql://[^"[:space:]]+:[^"[:space:]]+@)'
 else
-  FORBIDDEN_REGEX='(access-sandbox-[A-Za-z0-9_-]{6,}|public-sandbox-[A-Za-z0-9_-]{6,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|(PLAID_SECRET|SECRET_BOX_KEY|ALPACA_SECRET_KEY|HARNESSROUTER_API_KEY|WORKER_TOKEN)[[:space:]]*=[[:space:]]*["'\''][A-Za-z0-9_=-]{12,}["'\''])'
+  FORBIDDEN_REGEX='(sk-(hr-)?[A-Za-z0-9_-]{20,}|access-sandbox-[A-Za-z0-9_-]{6,}|public-sandbox-[A-Za-z0-9_-]{6,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|(PLAID_SECRET|SECRET_BOX_KEY|ALPACA_SECRET_KEY|HARNESSROUTER_API_KEY|TOKENROUTER_API_KEY|WORKER_TOKEN)[[:space:]]*=[[:space:]]*["'\''][A-Za-z0-9_=-]{12,}["'\''])'
 fi
 
 found=0

@@ -16,7 +16,9 @@ WEB_HASH_HOST="${PREFIX}-web-${CLOUD_RUN_SUFFIX}"
 WEB_NUM_HOST="${PREFIX}-web-${PROJECT_NUMBER}.us-central1.run.app"
 ADMIN_HASH_HOST="${PREFIX}-admin-${CLOUD_RUN_SUFFIX}"
 ADMIN_NUM_HOST="${PREFIX}-admin-${PROJECT_NUMBER}.us-central1.run.app"
-API_HASH_URL="https://${PREFIX}-api-${CLOUD_RUN_SUFFIX}"
+API_HASH_HOST="${PREFIX}-api-${CLOUD_RUN_SUFFIX}"
+API_NUM_HOST="${PREFIX}-api-${PROJECT_NUMBER}.us-central1.run.app"
+API_HASH_URL="https://${API_HASH_HOST}"
 
 echo "==> Initializing Identity Platform on ${GCP_PROJECT_ID} (idempotent)..."
 curl -sS -X POST \
@@ -43,7 +45,9 @@ CONFIG_JSON="$(cat <<EOF
     "${WEB_HASH_HOST}",
     "${WEB_NUM_HOST}",
     "${ADMIN_HASH_HOST}",
-    "${ADMIN_NUM_HOST}"
+    "${ADMIN_NUM_HOST}",
+    "${API_HASH_HOST}",
+    "${API_NUM_HOST}"
   ]
 }
 EOF

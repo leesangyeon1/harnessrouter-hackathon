@@ -24,6 +24,7 @@ _SAFE_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,128}$")
 
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+"), "Bearer [REDACTED]"),
+    (re.compile(r"\bsk-(?:hr-)?[A-Za-z0-9_-]{12,}"), "sk-[REDACTED]"),
     (re.compile(r"\baccess-sandbox-[A-Za-z0-9_-]+"), "access-sandbox-[REDACTED]"),
     (re.compile(r"\bpublic-sandbox-[A-Za-z0-9_-]+"), "public-sandbox-[REDACTED]"),
     (
@@ -33,8 +34,8 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
             r"(?i)(plaid_secret|secret_box_key|worker_token|alpaca_secret_key|"
-            r"apca-api-secret-key|harnessrouter_api_key|access_token|paper_key|"
-            r"private_key)(\s*[\"']?\s*[:=]\s*[\"']?)([^\s\"',}&]+)"
+            r"apca-api-secret-key|harnessrouter_api_key|tokenrouter_api_key|"
+            r"access_token|paper_key|private_key)(\s*[\"']?\s*[:=]\s*[\"']?)([^\s\"',}&]+)"
         ),
         r"\1\2[REDACTED]",
     ),

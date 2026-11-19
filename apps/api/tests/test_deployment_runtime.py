@@ -38,6 +38,12 @@ from finance_api.observability import (
 )
 from finance_api.plaid import PlaidClient
 from finance_api.sealing import SecretBox
+from finance_api.secret_console import (
+    GoogleOwnerVerifier,
+    InMemorySecretBackend,
+    PortalPublicConfig,
+    create_secret_console_app,
+)
 from finance_api.task_worker import TaskDispatchPayload, create_task_worker_app
 
 WORKER_AUDIENCE = "https://finance-worker-test.a.run.app"
@@ -383,4 +389,125 @@ def test_structured_logging_records_correlation_ids_and_redacts_secrets() -> Non
     assert "access-sandbox-998877" not in msg
     assert secret_val not in msg
     assert "shh_plaid" not in msg
+    sk_sample = "sk-hr-" + secrets.token_hex(12)
+    assert sk_sample not in redact_text(f"router={sk_sample}")
     assert "[REDACTED]" in redact_text(raw_msg)
+
+
+def test_root_secret_vault_enforces_google_owner_and_preserves_api_auth(
+    api_url: str,
+    verifier: IdTokenVerifier,
+    make_token: Callable[..., str],
+    no_plaid: PlaidClient,
+    secret_box: SecretBox,
+) -> None:
+    synth_tokenrouter = "sk-" + secrets.token_hex(16)
+    synth_plaid_id = secrets.token_hex(12)
+    vault = InMemorySecretBackend(
+        "hr-finance-dev",
+        initial={
+            "tokenrouter-api-key": synth_tokenrouter,
+            "plaid-client-id": synth_plaid_id,
+        },
+    )
+    owner_verifier = GoogleOwnerVerifier(
+        identity_project_id=verifier.project_id,
+        allowed_emails=["qcd2529@gmail.com"],
+        identity_signing_key=verifier.signing_key,
+    )
+    reloaded_plaid: list[tuple[str, str]] = []
+    console = create_secret_console_app(
+        owner_verifier,
+        vault,
+        PortalPublicConfig(
+            identity_project_id=verifier.project_id,
+            firebase_api_key="public-web-key",
+            customer_web_url="https://web.example.com",
+            admin_web_url="https://admin.example.com",
+        ),
+        on_plaid_credentials_updated=lambda cid, csec: reloaded_plaid.append((cid, csec)),
+    )
+    app = create_app(
+        create_pool(api_url, open_pool=False),
+        verifier,
+        no_plaid,
+        secret_box,
+        secret_console=console,
+    )
+    app.get("/declares-no-sign-in")(lambda: {"ok": True})
+
+    password_token = make_token(
+        email="qcd2529@gmail.com",
+        email_verified=True,
+        firebase={"sign_in_provider": "password"},
+    )
+    wrong_google_user = make_token(
+        email="someone.else@gmail.com",
+        email_verified=True,
+        firebase={"sign_in_provider": "google.com"},
+    )
+    owner_google_token = make_token(
+        email="qcd2529@gmail.com",
+        email_verified=True,
+        firebase={"sign_in_provider": "google.com"},
+    )
+
+    with TestClient(app) as client:
+        root = client.get("/")
+        assert root.status_code == 200
+        assert "Owner Secret Manager Vault" in root.text
+        assert "no-store" in root.headers["Cache-Control"]
+        assert synth_tokenrouter not in root.text
+        assert synth_plaid_id not in root.text
+
+        # Existing FastAPI route-level auth invariants remain intact.
+        assert client.get("/declares-no-sign-in").status_code == 401
+        assert client.get("/v1/me").status_code == 401
+
+        # Vault API blocks unauthenticated, password-based, and non-owner Google callers.
+        assert client.get("/admin-secrets/api/secrets").status_code == 401
+        assert (
+            client.get(
+                "/admin-secrets/api/secrets",
+                headers={"Authorization": f"Bearer {password_token}"},
+            ).status_code
+            == 403
+        )
+        assert (
+            client.get(
+                "/admin-secrets/api/secrets",
+                headers={"Authorization": f"Bearer {wrong_google_user}"},
+            ).status_code
+            == 403
+        )
+
+        # Verified Google owner `qcd2529@gmail.com` can list (masked), reveal, and upload secrets.
+        owner_headers = {"Authorization": f"Bearer {owner_google_token}"}
+        listed = client.get("/admin-secrets/api/secrets", headers=owner_headers)
+        assert listed.status_code == 200
+        assert listed.json()["owner_email"] == "qcd2529@gmail.com"
+        assert synth_tokenrouter not in listed.text
+
+        revealed = client.get(
+            "/admin-secrets/api/secrets/tokenrouter-api-key/reveal",
+            headers=owner_headers,
+        )
+        assert revealed.status_code == 200
+        assert revealed.json()["value"] == synth_tokenrouter
+
+        # Non-allowlisted DB/internal secrets cannot be read or written via the console.
+        db_reveal = client.get(
+            "/admin-secrets/api/secrets/db-url-api/reveal", headers=owner_headers
+        )
+        assert db_reveal.status_code == 404
+
+        new_plaid_secret = secrets.token_hex(15)
+        updated = client.put(
+            "/admin-secrets/api/secrets/plaid-secret",
+            headers=owner_headers,
+            json={"value": new_plaid_secret},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["hot_reloaded"] is True
+        assert updated.json()["secret"]["version"] == "2"
+        assert reloaded_plaid == [(synth_plaid_id, new_plaid_secret)]

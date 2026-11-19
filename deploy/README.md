@@ -78,11 +78,12 @@ Cloud SQL `max_connections` defaults to **`200`** (checked at plan time by `chec
 | `db-url-cycle` | `postgresql://finance_cycle_app:<pw>@/finance?host=/cloudsql/<conn>` | `sa-cycle-job` ONLY |
 | `db-url-executor` | `postgresql://finance_executor_app:<pw>@/finance?host=/cloudsql/<conn>` | `sa-exec-job` ONLY |
 | `secret-box-key` | 32-byte URL-safe base64 Fernet key | `sa-api`, `sa-exec-job`, `sa-worker` |
-| `plaid-client-id` | Plaid client ID | `sa-api` ONLY |
-| `plaid-secret` | Plaid **Sandbox** secret | `sa-api` ONLY |
-| `alpaca-data-api-key` | Alpaca market data key ID | `sa-cycle-job` ONLY |
-| `alpaca-data-secret-key` | Alpaca market data secret key | `sa-cycle-job` ONLY |
-| `harnessrouter-api-key` | HarnessRouter API key | `sa-worker` ONLY |
+| `plaid-client-id` | Plaid client ID | `sa-api` |
+| `plaid-secret` | Plaid **Sandbox** secret | `sa-api` |
+| `alpaca-data-api-key` | Alpaca Paper / Market Data key ID | `sa-cycle-job`, `sa-api` (owner vault) |
+| `alpaca-data-secret-key` | Alpaca Paper / Market Data secret key | `sa-cycle-job`, `sa-api` (owner vault) |
+| `harnessrouter-api-key` | HarnessRouter API key | `sa-worker`, `sa-api` (owner vault) |
+| `tokenrouter-api-key` | TokenRouter API key | `sa-worker`, `sa-api` (owner vault) |
 
 ### Next.js Variable Separation
 - **Public Browser (`NEXT_PUBLIC_*`)**: `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_IDENTITY_PROJECT_ID`, `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`.

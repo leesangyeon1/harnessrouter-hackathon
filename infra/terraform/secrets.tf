@@ -47,18 +47,43 @@ locals {
       accessors = [google_service_account.api.email]
     }
     alpaca_data_api_key = {
-      id        = "${local.prefix}-alpaca-data-api-key"
-      accessors = [google_service_account.cycle_job.email]
+      id = "${local.prefix}-alpaca-data-api-key"
+      accessors = [
+        google_service_account.cycle_job.email,
+        google_service_account.api.email,
+      ]
     }
     alpaca_data_secret_key = {
-      id        = "${local.prefix}-alpaca-data-secret-key"
-      accessors = [google_service_account.cycle_job.email]
+      id = "${local.prefix}-alpaca-data-secret-key"
+      accessors = [
+        google_service_account.cycle_job.email,
+        google_service_account.api.email,
+      ]
     }
     harnessrouter_api_key = {
-      id        = "${local.prefix}-harnessrouter-api-key"
-      accessors = [google_service_account.worker.email]
+      id = "${local.prefix}-harnessrouter-api-key"
+      accessors = [
+        google_service_account.worker.email,
+        google_service_account.api.email,
+      ]
+    }
+    tokenrouter_api_key = {
+      id = "${local.prefix}-tokenrouter-api-key"
+      accessors = [
+        google_service_account.worker.email,
+        google_service_account.api.email,
+      ]
     }
   }
+
+  vault_managed_secret_keys = toset([
+    "plaid_client_id",
+    "plaid_secret",
+    "alpaca_data_api_key",
+    "alpaca_data_secret_key",
+    "harnessrouter_api_key",
+    "tokenrouter_api_key",
+  ])
 
   secret_iam_bindings = merge([
     for key, spec in local.secret_specs : {
@@ -94,4 +119,20 @@ resource "google_secret_manager_secret_iam_member" "accessor" {
   secret_id = google_secret_manager_secret.managed[each.value.secret_key].id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${each.value.sa_email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "vault_version_adder" {
+  for_each = local.vault_managed_secret_keys
+
+  secret_id = google_secret_manager_secret.managed[each.value].id
+  role      = "roles/secretmanager.secretVersionAdder"
+  member    = "serviceAccount:${google_service_account.api.email}"
+}
+
+resource "google_secret_manager_secret_iam_member" "vault_metadata_viewer" {
+  for_each = local.vault_managed_secret_keys
+
+  secret_id = google_secret_manager_secret.managed[each.value].id
+  role      = "roles/secretmanager.viewer"
+  member    = "serviceAccount:${google_service_account.api.email}"
 }

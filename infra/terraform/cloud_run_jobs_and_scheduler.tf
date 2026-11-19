@@ -329,6 +329,15 @@ resource "google_cloud_run_v2_job" "agent_task" {
             }
           }
         }
+        env {
+          name = "TOKENROUTER_API_KEY"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed["tokenrouter_api_key"].secret_id
+              version = "latest"
+            }
+          }
+        }
       }
     }
   }

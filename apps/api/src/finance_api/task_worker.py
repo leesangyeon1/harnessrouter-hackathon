@@ -165,6 +165,7 @@ def worker_app_from_env() -> FastAPI:
     register_secret_for_redaction(
         os.environ.get("DATABASE_URL"),
         os.environ.get("HARNESSROUTER_API_KEY"),
+        os.environ.get("TOKENROUTER_API_KEY"),
         os.environ.get("SECRET_BOX_KEY"),
     )
     pool = create_pool(os.environ["DATABASE_URL"], open_pool=False)

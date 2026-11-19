@@ -84,7 +84,8 @@ for ext_secret in \
   "plaid-secret" \
   "alpaca-data-api-key" \
   "alpaca-data-secret-key" \
-  "harnessrouter-api-key"; do
+  "harnessrouter-api-key" \
+  "tokenrouter-api-key"; do
   if ! has_version "${PREFIX}-${ext_secret}"; then
     echo "==> Initializing placeholder for ${PREFIX}-${ext_secret}..."
     printf 'unconfigured-replace-in-secret-manager' | add_secret_stdin "${PREFIX}-${ext_secret}"

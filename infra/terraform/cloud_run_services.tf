@@ -107,6 +107,15 @@ resource "google_cloud_run_v2_service" "worker" {
           }
         }
       }
+      env {
+        name = "TOKENROUTER_API_KEY"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.managed["tokenrouter_api_key"].secret_id
+            version = "latest"
+          }
+        }
+      }
 
       startup_probe {
         http_get {
@@ -132,6 +141,8 @@ resource "google_cloud_run_v2_service" "worker" {
   depends_on = [
     google_project_service.required,
     google_secret_manager_secret_iam_member.accessor,
+    google_secret_manager_secret_iam_member.vault_version_adder,
+    google_secret_manager_secret_iam_member.vault_metadata_viewer,
   ]
 }
 
@@ -235,6 +246,34 @@ resource "google_cloud_run_v2_service" "api" {
         name  = "TASKS_INVOKER_SA_EMAIL"
         value = google_service_account.tasks_invoker.email
       }
+      env {
+        name  = "SECRET_PREFIX"
+        value = local.prefix
+      }
+      env {
+        name  = "SECRET_ADMIN_ALLOWED_EMAILS"
+        value = join(",", var.secret_admin_allowed_emails)
+      }
+      env {
+        name  = "PUBLIC_FIREBASE_API_KEY"
+        value = var.next_public_firebase_api_key
+      }
+      env {
+        name  = "PUBLIC_FIREBASE_AUTH_DOMAIN"
+        value = var.next_public_firebase_auth_domain != "" ? var.next_public_firebase_auth_domain : "${local.identity_project_id}.firebaseapp.com"
+      }
+      env {
+        name  = "GOOGLE_OAUTH_CLIENT_ID"
+        value = var.google_oauth_client_id
+      }
+      env {
+        name  = "PUBLIC_CUSTOMER_URL"
+        value = var.public_customer_url
+      }
+      env {
+        name  = "PUBLIC_ADMIN_URL"
+        value = var.public_admin_url
+      }
 
       env {
         name = "DATABASE_URL"
@@ -297,6 +336,8 @@ resource "google_cloud_run_v2_service" "api" {
   depends_on = [
     google_project_service.required,
     google_secret_manager_secret_iam_member.accessor,
+    google_secret_manager_secret_iam_member.vault_version_adder,
+    google_secret_manager_secret_iam_member.vault_metadata_viewer,
   ]
 }
 

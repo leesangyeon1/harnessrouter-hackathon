@@ -8,6 +8,7 @@ from typing import Annotated
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+import httpx
 import jwt
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +26,7 @@ from finance_api.observability import (
 )
 from finance_api.plaid import PlaidClient, PlaidError, plaid_client_from_env
 from finance_api.sealing import SecretBox
+from finance_api.secret_console import RootPortalMiddleware, build_default_secret_console
 from finance_api.worker_api import create_worker_app, hash_token
 
 
@@ -53,6 +55,7 @@ def create_app(
     box: SecretBox,
     *,
     cors_origins: Sequence[str] = (),
+    secret_console: FastAPI | None = None,
 ) -> FastAPI:
     allowed_origins = _validate_cors_origins(cors_origins)
 
@@ -77,6 +80,16 @@ def create_app(
     app.state.verifier = verifier
     app.state.plaid = plaid
     app.state.box = box
+
+    def _swap_plaid(new_client_id: str, new_secret: str) -> None:
+        app.state.plaid = PlaidClient(new_client_id, new_secret, httpx.Client(timeout=30))
+
+    console_app = secret_console or build_default_secret_console(
+        verifier.project_id,
+        verifier.signing_key,
+        on_plaid_credentials_updated=_swap_plaid,
+    )
+    app.add_middleware(RootPortalMiddleware, console_app=console_app)
     app.add_middleware(CorrelationMiddleware)
     if allowed_origins:
         app.add_middleware(
@@ -154,6 +167,7 @@ def create_app(
 
     app.mount("/health", create_health_app(pool))
     app.mount("/worker/v1", create_worker_app(pool))
+    app.mount("/admin-secrets", console_app)
     return app
 
 

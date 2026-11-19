@@ -120,6 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         os.environ.get("PLAID_SECRET"),
         os.environ.get("SECRET_BOX_KEY"),
         os.environ.get("HARNESSROUTER_API_KEY"),
+        os.environ.get("TOKENROUTER_API_KEY"),
     )
     run_job(args[0], os.environ["DATABASE_URL"])
     return 0

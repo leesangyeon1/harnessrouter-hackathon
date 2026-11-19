@@ -29,6 +29,14 @@ class IdTokenVerifier:
         self._project_id = project_id
         self._signing_key = signing_key
 
+    @property
+    def project_id(self) -> str:
+        return self._project_id
+
+    @property
+    def signing_key(self) -> Callable[[str], jwt.PyJWK]:
+        return self._signing_key
+
     def verify(self, token: str) -> str:
         """Return the uid the token was issued to."""
         try:

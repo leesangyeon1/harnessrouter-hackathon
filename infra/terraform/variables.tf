@@ -142,6 +142,30 @@ variable "next_public_firebase_auth_domain" {
   default     = ""
 }
 
+variable "public_customer_url" {
+  description = "Public HTTPS URL of the customer Next.js web app linked from the API status page."
+  type        = string
+  default     = ""
+}
+
+variable "public_admin_url" {
+  description = "Public HTTPS URL of the operations admin Next.js app linked from the API status page."
+  type        = string
+  default     = ""
+}
+
+variable "secret_admin_allowed_emails" {
+  description = "Verified Google account emails permitted to access the private Secret Manager vault."
+  type        = list(string)
+  default     = ["qcd2529@gmail.com"]
+}
+
+variable "google_oauth_client_id" {
+  description = "Optional Google Identity Services OAuth 2.0 Web Client ID for direct GIS sign-in."
+  type        = string
+  default     = ""
+}
+
 # --- Provider Sandbox & Paper guardrails ---
 
 variable "plaid_host" {

@@ -103,7 +103,7 @@ jobs:
         run: |
           ./deploy/scripts/verify_bundle_secrets.sh --repo apps/api/src apps/web/src apps/admin/src packages infra deploy/docker
           docker build -f apps/api/Dockerfile -t finance-api:${GITHUB_SHA} .
-          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.task_worker, finance_api.migrate, finance_api.bootstrap_roles, finance_api.jobs, finance_api.market_ingest"
+          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.secret_console, finance_api.task_worker, finance_api.migrate, finance_api.bootstrap_roles, finance_api.jobs, finance_api.market_ingest"
 
           docker build -f apps/web/Dockerfile \
             --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.placeholder.invalid \
@@ -193,6 +193,25 @@ jobs:
             fi
           fi
 
+          if gcloud secrets describe "${NAME_PREFIX}-${ENV_NAME}-tokenrouter-api-key" --project="${GCP_PROJECT_ID}" >/dev/null 2>&1; then
+            if ! terraform state show 'google_secret_manager_secret.managed["tokenrouter_api_key"]' >/dev/null 2>&1; then
+              terraform import \
+                -var="project_id=${GCP_PROJECT_ID}" \
+                -var="region=${GCP_REGION}" \
+                -var="environment=${ENV_NAME}" \
+                -var="api_image=${REPO}/finance-api:${GITHUB_SHA}" \
+                -var="deploy_web_service=true" \
+                -var="web_image=${REPO}/finance-web:${GITHUB_SHA}" \
+                -var="deploy_admin_service=true" \
+                -var="admin_image=${REPO}/finance-admin:${GITHUB_SHA}" \
+                -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
+                -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+                -var="db_tier=${DB_TIER}" \
+                'google_secret_manager_secret.managed["tokenrouter_api_key"]' \
+                "projects/${GCP_PROJECT_ID}/secrets/${NAME_PREFIX}-${ENV_NAME}-tokenrouter-api-key"
+            fi
+          fi
+
           terraform plan \
             -var="project_id=${GCP_PROJECT_ID}" \
             -var="region=${GCP_REGION}" \
@@ -204,6 +223,11 @@ jobs:
             -var="admin_image=${REPO}/finance-admin:${GITHUB_SHA}" \
             -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
             -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+            -var="next_public_firebase_api_key=${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}" \
+            -var="next_public_firebase_auth_domain=${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}" \
+            -var="public_customer_url=${{ vars.NEXT_PUBLIC_CUSTOMER_URL }}" \
+            -var="public_admin_url=${{ vars.NEXT_PUBLIC_ADMIN_URL }}" \
+            -var="google_oauth_client_id=${{ vars.GOOGLE_OAUTH_CLIENT_ID }}" \
             -var="db_tier=${DB_TIER}" \
             -out=tfplan
 
@@ -336,6 +360,11 @@ jobs:
             -var="admin_image=${{ steps.build.outputs.admin_image }}" \
             -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
             -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+            -var="next_public_firebase_api_key=${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}" \
+            -var="next_public_firebase_auth_domain=${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}" \
+            -var="public_customer_url=${{ vars.NEXT_PUBLIC_CUSTOMER_URL }}" \
+            -var="public_admin_url=${{ vars.NEXT_PUBLIC_ADMIN_URL }}" \
+            -var="google_oauth_client_id=${{ vars.GOOGLE_OAUTH_CLIENT_ID }}" \
             -var="db_tier=${DB_TIER}"
 
       - name: Update and execute DB migration & runtime role bootstrap job (aborts deploy on failure)
@@ -404,6 +433,12 @@ jobs:
           echo "Worker URL: ${WORKER_URL}"
 
           curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "${API_URL}/health/ready" | grep -q '"ready"'
+
+          API_ROOT="$(curl -sS -o /dev/null -w '%{http_code}' "${API_URL}/")"
+          test "${API_ROOT}" = "200"
+
+          VAULT_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/admin-secrets/api/secrets")"
+          test "${VAULT_UNAUTH}" = "401"
 
           WEB_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "${WEB_URL}/")"
           test "${WEB_STATUS}" = "200"
