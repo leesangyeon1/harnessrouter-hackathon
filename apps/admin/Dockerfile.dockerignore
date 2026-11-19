@@ -1,0 +1,9 @@
+**
+!apps/
+!apps/admin/
+!apps/admin/**
+apps/admin/node_modules
+apps/admin/.next
+apps/admin/.env*
+apps/admin/test-results
+apps/admin/*.tsbuildinfo

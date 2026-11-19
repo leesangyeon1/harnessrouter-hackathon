@@ -1,0 +1,95 @@
+{
+  "contract": "Original Rocket Money-inspired personal-finance interface with warm neutral canvas, coral actions, calm green accents, readable financial hierarchy, explicitly synthetic preview, actual API-backed spending and separately deployed fail-closed operations app. Scope and unknowns are visible; no live-money or privileged job-start action.",
+  "targetViewports": ["1440x1000", "390x844"],
+  "accessibility": {
+    "status": "pass",
+    "evidence": "Playwright passed axe WCAG 2 A/AA and 2.1 AA checks for overview and all six secondary customer views plus the authenticated mobile operations view. Browser tests verified skip-link keyboard focus, main focus, Escape dialog closure and reduced-motion scroll behavior. Contrast failures were corrected and rerun. These automated checks are not an assistive-technology certification."
+  },
+  "responsive": {
+    "status": "pass",
+    "evidence": "Rendered and inspected 1440x1000 desktop and 390x844 mobile captures: sidebar becomes a dismissible mobile drawer, panels stack, charts remain within their panels, and no document horizontal overflow occurs. A deliberately long account label truncates inside its row without overflowing. Operations tables scroll within a labelled keyboard-focusable region."
+  },
+  "contentStates": {
+    "loading": {
+      "status": "pass",
+      "evidence": "customer-loading.png captures the updating status during a delayed local report response; the status clears after completion."
+    },
+    "empty": {
+      "status": "pass",
+      "evidence": "customer-empty.png captures a signed-in 404 report as an empty spending view with a connection action, without sample figures."
+    },
+    "error": {
+      "status": "pass",
+      "evidence": "customer-error.png captures a synthetic 502 provider failure with retry; the browser test resets the fixture and successfully retries."
+    },
+    "partial": {
+      "status": "pass",
+      "evidence": "customer-partial.png retains known live-fixture spending while net worth and unimplemented account reads show availability states, with no synthetic balance fallback."
+    },
+    "success": {
+      "status": "pass",
+      "evidence": "customer-connected.png captures the fixture seed/sync/compute response, exact $1,225.10 spending total and calculation timestamp. admin-desktop.png follows issue and dismissal of a one-time synthetic credential."
+    },
+    "permission": {
+      "status": "pass",
+      "evidence": "Anonymous operations page requests redirect; non-admin session creation returns 403; role removal returns actual HTTP 403 for both protected page and API, captured in admin-denied.png. Cross-origin mutation is denied. All identity/API data in these tests is synthetic."
+    }
+  },
+  "renderedEvidence": [
+    {
+      "viewport": "1440x1000",
+      "artifact": "customer-desktop.png",
+      "observation": "Inspected desktop overview: aligned two-column panels, readable primary balances, restrained coral/green chart hierarchy, visible synthetic-data banner and stable sidebar."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "customer-mobile.png",
+      "observation": "Inspected full-page mobile overview: stacked panels, compact topbar, visible connect action, chart and account rows fit without page overflow."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "customer-connected.png",
+      "observation": "Signed-in fixture report shows backend-style decimal values and its calculation time, distinct from synthetic preview."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "customer-empty.png",
+      "observation": "Empty report has a clear heading and connection action instead of a zero-valued fabricated report."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "customer-loading.png",
+      "observation": "Updating banner remains visible while report response is pending."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "customer-error.png",
+      "observation": "Provider failure is visible with retry while preserving existing report context."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "customer-partial.png",
+      "observation": "Known spending and unknown net worth coexist without sample account figures in the authenticated workspace."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "customer-long-label.png",
+      "observation": "A deliberately long account name remains contained in the mobile account row."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "admin-desktop.png",
+      "observation": "Inspected independent operations UI: matching visual language with a denser credential table and one clear administrative action; dismissed credential value is absent."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "admin-mobile.png",
+      "observation": "Operations summary stacks and credential table remains inside its scroll region; automated axe checks pass."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "admin-denied.png",
+      "observation": "Role removal yields a server-generated denied page and HTTP 403, rather than rendering operations data."
+    }
+  ]
+}

@@ -1,0 +1,171 @@
+import type { SpendingReport } from "./api";
+
+// Explicitly synthetic, read-only preview. Never merged into authenticated API state.
+const amounts = [145000, 59842, 38990, 26450, 18900, 16283, 14200, 8800];
+const names = [
+  "RENT_AND_UTILITIES",
+  "FOOD_AND_DRINK",
+  "SHOPPING",
+  "TRANSPORTATION",
+  "ENTERTAINMENT",
+  "TRAVEL",
+  "MEDICAL",
+  "OTHER",
+];
+export const demoReport: SpendingReport = {
+  id: "synthetic-preview",
+  kind: "spending",
+  computed_at: "2026-11-18T12:00:00Z",
+  figures: [
+    ...names.map((category, i) => ({
+      month: "2026-11",
+      category,
+      amount: (amounts[i] / 100).toFixed(2),
+    })),
+    ...names.map((category, i) => ({
+      month: "2026-10",
+      category,
+      amount: ((amounts[i] * 1.12) / 100).toFixed(2),
+    })),
+    ...names.map((category, i) => ({
+      month: "2026-09",
+      category,
+      amount: ((amounts[i] * 0.96) / 100).toFixed(2),
+    })),
+  ],
+};
+export const palette = [
+  "#ef745f",
+  "#e9b05c",
+  "#7598ac",
+  "#72a58d",
+  "#b39abd",
+  "#9faeb8",
+  "#cf968b",
+  "#c8c8c4",
+];
+export const accounts = [
+  {
+    name: "Everyday checking",
+    bank: "Chase",
+    type: "Checking",
+    balance: 624032,
+    color: "#315e96",
+    short: "C",
+    last: "4821",
+  },
+  {
+    name: "Rainy day fund",
+    bank: "Ally",
+    type: "Savings",
+    balance: 1845000,
+    color: "#654c87",
+    short: "a",
+    last: "9012",
+  },
+  {
+    name: "Paper portfolio",
+    bank: "Alpaca",
+    type: "Paper investment",
+    balance: 2130765,
+    color: "#946a29",
+    short: "A",
+    last: "",
+  },
+];
+export const transactions = [
+  {
+    name: "Whole Foods Market",
+    date: "Nov 18",
+    category: "Groceries",
+    amount: 8642,
+    symbol: "W",
+    color: "#4f795b",
+  },
+  {
+    name: "Monthly rent",
+    date: "Nov 17",
+    category: "Housing",
+    amount: 145000,
+    symbol: "H",
+    color: "#d08c72",
+  },
+  {
+    name: "Blue Bottle Coffee",
+    date: "Nov 17",
+    category: "Food & drink",
+    amount: 650,
+    symbol: "B",
+    color: "#6e9ca7",
+  },
+  {
+    name: "Spotify",
+    date: "Nov 16",
+    category: "Entertainment",
+    amount: 1199,
+    symbol: "S",
+    color: "#477c5a",
+  },
+];
+export const market = [
+  {
+    symbol: "AAPL",
+    name: "Apple Inc.",
+    sector: "stock",
+    price: "224.38",
+    move: "+1.42%",
+    stable: "M01",
+    aggressive: "M07",
+    volume: "$8.2B",
+  },
+  {
+    symbol: "NVDA",
+    name: "NVIDIA Corporation",
+    sector: "stock",
+    price: "145.26",
+    move: "+2.18%",
+    stable: "M02",
+    aggressive: "M08",
+    volume: "$12.4B",
+  },
+  {
+    symbol: "TLT",
+    name: "iShares 20+ Year Treasury",
+    sector: "bond",
+    price: "91.74",
+    move: "−0.36%",
+    stable: "M03",
+    aggressive: "M01",
+    volume: "$1.6B",
+  },
+  {
+    symbol: "BND",
+    name: "Vanguard Total Bond Market",
+    sector: "bond",
+    price: "73.22",
+    move: "+0.14%",
+    stable: "None",
+    aggressive: "M05",
+    volume: "$412M",
+  },
+  {
+    symbol: "BTC/USD",
+    name: "Bitcoin",
+    sector: "crypto",
+    price: "86,240.50",
+    move: "+2.64%",
+    stable: "M08",
+    aggressive: "M07",
+    volume: "$186M",
+  },
+  {
+    symbol: "ETH/USD",
+    name: "Ethereum",
+    sector: "crypto",
+    price: "3,142.80",
+    move: "+1.83%",
+    stable: "M02",
+    aggressive: "M11",
+    volume: "$74M",
+  },
+];
