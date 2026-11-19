@@ -73,6 +73,7 @@ import {
 } from "@/lib/demo";
 import { authConfigured, identityAuth } from "@/lib/firebase";
 import { CycleDiscovery } from "./cycle-discovery";
+import { SyncNotice } from "./sync-notice";
 
 type View =
   | "overview"
@@ -311,7 +312,18 @@ export function FinanceApp() {
   const [mode, setMode] = useState<"stable" | "aggressive">("stable");
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const sequence = useRef(0);
-  const visibleReport = demo ? demoReport : report;
+  const identity = useRef<string | null | undefined>(undefined);
+  const transactionsPreparing = !demo && counts?.transactions_ready === false;
+  const readyEmptyReport =
+    !demo &&
+    counts?.transactions_ready === true &&
+    report !== null &&
+    report.figures.length === 0;
+  const visibleReport = demo
+    ? demoReport
+    : transactionsPreparing
+      ? null
+      : report;
   const summary = summarize(visibleReport, month);
   const [year, monthNumber] = month.split("-").map(Number);
   const priorMonth = `${monthNumber === 1 ? year - 1 : year}-${String(monthNumber === 1 ? 12 : monthNumber - 1).padStart(2, "0")}`;
@@ -383,8 +395,12 @@ export function FinanceApp() {
       .then((auth) => {
         if (!active) return;
         unsubscribe = onIdTokenChanged(auth, (account) => {
-          sequence.current++;
+          if (!active) return;
           setUser(account);
+          const nextIdentity = account?.uid ?? null;
+          if (identity.current === nextIdentity) return;
+          identity.current = nextIdentity;
+          sequence.current++;
           setReport(null);
           setMe(null);
           setCounts(null);
@@ -393,6 +409,7 @@ export function FinanceApp() {
             setDemo(false);
             void refresh(account);
           } else {
+            setDemo(true);
             setLoading(false);
           }
         });
@@ -454,11 +471,18 @@ export function FinanceApp() {
       if (sequence.current !== current) return;
       const synced = await api.sync();
       if (sequence.current !== current) return;
+      setCounts(synced);
+      setDemo(false);
+      if (!synced.transactions_ready) {
+        setDialog(null);
+        setToast(
+          "Sandbox connected. Plaid is still preparing your transactions; retry sync to check again.",
+        );
+        return;
+      }
       const computed = await api.computeSpending();
       if (sequence.current !== current) return;
-      setCounts(synced);
       setReport(computed);
-      setDemo(false);
       const latest = computed.figures
         .map((row) => row.month)
         .sort()
@@ -492,10 +516,25 @@ export function FinanceApp() {
       const synced = await api.sync();
       if (sequence.current !== current) return;
       setCounts(synced);
+      if (!synced.transactions_ready) {
+        setToast(
+          "Plaid is still preparing transactions. No spending report was calculated; you can retry sync.",
+        );
+        return;
+      }
       const result = await api.computeSpending();
       if (sequence.current !== current) return;
       setReport(result);
-      setToast("Your Sandbox data and spending report are up to date.");
+      const latest = result.figures
+        .map((row) => row.month)
+        .sort()
+        .at(-1);
+      if (latest && (!report || transactionsPreparing)) setMonth(latest);
+      setToast(
+        Object.keys(synced.unavailable).length
+          ? "Spending report updated. Some products are not available from Plaid."
+          : "Your Sandbox data and spending report are up to date.",
+      );
     } catch (caught) {
       if (sequence.current === current)
         setError(
@@ -809,7 +848,13 @@ export function FinanceApp() {
               <CircleAlert size={18} />
               <span>{error}</span>
               <button
-                onClick={() => (user ? void refresh(user) : setDialog("auth"))}
+                onClick={() =>
+                  user
+                    ? transactionsPreparing
+                      ? void sync()
+                      : void refresh(user)
+                    : setDialog("auth")
+                }
               >
                 {user ? "Try again" : "Sign in"}
               </button>
@@ -827,6 +872,9 @@ export function FinanceApp() {
               <LoaderCircle size={16} className="spin" />
               Updating your workspace…
             </div>
+          )}
+          {!demo && (
+            <SyncNotice status={counts} busy={busy} retry={() => void sync()} />
           )}
 
           {view === "overview" && (
@@ -963,8 +1011,20 @@ export function FinanceApp() {
                   ) : (
                     <Empty
                       icon={ChartNoAxesCombined}
-                      title="Meet your spending"
-                      text="Once your first report is ready, your monthly categories will show up here."
+                      title={
+                        transactionsPreparing
+                          ? "Transactions are still arriving"
+                          : readyEmptyReport
+                            ? "No spending categories yet"
+                            : "Meet your spending"
+                      }
+                      text={
+                        transactionsPreparing
+                          ? "Your spending is unknown while Plaid prepares the transactions. Use Retry sync above to check again."
+                          : readyEmptyReport
+                            ? "Plaid has finished preparing transactions. The computed report currently has no spending categories."
+                            : "Once your first report is ready, your monthly categories will show up here."
+                      }
                       action={
                         <button
                           className="button secondary"
@@ -1241,10 +1301,24 @@ export function FinanceApp() {
                     title={
                       loading
                         ? "Bringing your report together"
-                        : "A fresh start for your spending"
+                        : transactionsPreparing
+                          ? "Transactions are still arriving"
+                          : readyEmptyReport
+                            ? "No spending categories yet"
+                            : "A fresh start for your spending"
                     }
-                    text="Connect and sync your Sandbox profile, then we’ll build your first monthly report from the stored transactions."
-                    action={action}
+                    text={
+                      transactionsPreparing
+                        ? "Your spending is unknown while Plaid prepares the transactions. Use Retry sync above to check again."
+                        : readyEmptyReport
+                          ? "Plaid has finished preparing transactions. The computed report currently has no spending categories."
+                          : "Connect and sync your Sandbox profile, then we’ll build your first monthly report from the stored transactions."
+                    }
+                    action={
+                      transactionsPreparing || readyEmptyReport
+                        ? undefined
+                        : action
+                    }
                   />
                 </section>
               )}
@@ -1869,7 +1943,11 @@ export function FinanceApp() {
                   <span
                     className={`pill ${counts ? "positive-pill" : "neutral-pill"}`}
                   >
-                    {counts ? "Connected" : "Not connected"}
+                    {transactionsPreparing
+                      ? "Transactions preparing"
+                      : counts
+                        ? "Connected"
+                        : "Not connected"}
                   </span>
                 </div>
                 <div className="setting-row">

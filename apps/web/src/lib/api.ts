@@ -12,6 +12,8 @@ export type SyncCounts = {
   transactions: number;
   liabilities: number;
   holdings: number;
+  transactions_ready: boolean;
+  unavailable: Partial<Record<"liabilities" | "holdings", string>>;
 };
 
 export function toCents(value: string): number {
@@ -195,7 +197,17 @@ export class FinanceApi {
         data?.transactions,
         data?.liabilities,
         data?.holdings,
-      ].every((n) => Number.isInteger(n) && n >= 0)
+      ].every((n) => Number.isSafeInteger(n) && n >= 0) ||
+      typeof data.transactions_ready !== "boolean" ||
+      !data.unavailable ||
+      typeof data.unavailable !== "object" ||
+      Array.isArray(data.unavailable) ||
+      !Object.entries(data.unavailable).every(
+        ([product, code]) =>
+          ["liabilities", "holdings"].includes(product) &&
+          typeof code === "string" &&
+          code.trim().length > 0,
+      )
     )
       throw new ApiError(502, "The sync response could not be read.");
     return data;

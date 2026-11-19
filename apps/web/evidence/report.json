@@ -115,6 +115,21 @@
       "viewport": "1440x1000",
       "artifact": "cycle-loading.png",
       "observation": "A delayed synthetic latest-cycle response displays a loading status and then resolves to the stored screen. The API test also distinguishes 404 from authorization/provider errors."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "plaid-preparing.png",
+      "observation": "A synthetic zero-transaction sync with transactions_ready=false shows a preparing notice and manual retry. No report write occurs, report export is disabled, and no zero spending total is displayed. Unavailable products retain their codes."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "plaid-preparing-mobile.png",
+      "observation": "Preparing and unavailable-product notices wrap within the mobile page, expose a reachable retry, and pass axe AA checks without page overflow."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "plaid-unavailable.png",
+      "observation": "After a manual retry confirms readiness, spending appears while liabilities/holdings remain explicitly unavailable with provider codes and unchanged-storage notice. Zero product counts are not shown as availability."
     }
   ]
 }

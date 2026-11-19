@@ -90,3 +90,62 @@ test("API origin accepts HTTPS or explicit local development only", () => {
   ])
     assert.throws(() => apiOrigin(url));
 });
+
+test("sync retains preparing status, final zero counts and named unavailable products", async () => {
+  const base = {
+    accounts: 4,
+    transactions: 0,
+    liabilities: 0,
+    holdings: 0,
+    transactions_ready: false,
+    unavailable: { holdings: "PRODUCTS_NOT_SUPPORTED" },
+  };
+  const api = new FinanceApi(
+    "https://api.example.com",
+    async () => "synthetic",
+    async () => Response.json(base),
+  );
+  const status = await api.sync();
+  assert.equal(status.transactions_ready, false);
+  assert.equal(status.transactions, 0);
+  assert.equal(status.unavailable.holdings, "PRODUCTS_NOT_SUPPORTED");
+  const ready = new FinanceApi(
+    "https://api.example.com",
+    async () => "synthetic",
+    async () =>
+      Response.json({ ...base, transactions_ready: true, unavailable: {} }),
+  );
+  assert.equal((await ready.sync()).transactions_ready, true);
+});
+
+test("sync refuses unknown readiness and malformed availability rather than defaulting to ready", async () => {
+  const base = {
+    accounts: 4,
+    transactions: 0,
+    liabilities: 0,
+    holdings: 0,
+    transactions_ready: false,
+    unavailable: {},
+  };
+  for (const overrides of [
+    { transactions_ready: undefined },
+    { transactions_ready: null },
+    { transactions_ready: "false" },
+    { unavailable: undefined },
+    { unavailable: null },
+    { unavailable: [] },
+    { unavailable: { holdings: 0 } },
+    { unavailable: { holdings: "" } },
+    { unavailable: { accounts: "UNKNOWN" } },
+  ]) {
+    const api = new FinanceApi(
+      "https://api.example.com",
+      async () => "synthetic",
+      async () => Response.json({ ...base, ...overrides }),
+    );
+    await assert.rejects(
+      () => api.sync(),
+      (error: unknown) => error instanceof ApiError && error.status === 502,
+    );
+  }
+});

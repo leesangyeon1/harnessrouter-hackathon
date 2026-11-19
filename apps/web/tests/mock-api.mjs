@@ -3,6 +3,7 @@ import http from "node:http";
 let role = "admin";
 let scenario = "report";
 let cycleScenario = "ready";
+let syncScenario = "ready";
 // Synthetic local screen; no live market/provider data is used here.
 const stockCoverage = {
   provider_listed: 23,
@@ -132,12 +133,14 @@ const server = http.createServer(async (req, res) => {
       role = "admin";
       scenario = data.scenario ?? "report";
       cycleScenario = data.cycleScenario ?? "ready";
+      syncScenario = data.syncScenario ?? "ready";
       tokens = [];
       seeded = false;
     }
     if (path.endsWith("role")) role = data.role;
     if (path.endsWith("scenario")) scenario = data.scenario;
     if (path.endsWith("cycle")) cycleScenario = data.scenario;
+    if (path.endsWith("sync")) syncScenario = data.scenario;
     send({ status: "ok" });
     return;
   }
@@ -194,7 +197,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (path === "/v1/plaid/sync") {
-    send({ accounts: 4, transactions: 12, liabilities: 2, holdings: 1 });
+    const unavailable = ["preparing", "unavailable"].includes(syncScenario)
+      ? { liabilities: "PRODUCT_NOT_READY", holdings: "PRODUCTS_NOT_SUPPORTED" }
+      : {};
+    send({
+      accounts: 4,
+      transactions: ["preparing", "ready-empty"].includes(syncScenario)
+        ? 0
+        : 12,
+      liabilities: Object.keys(unavailable).length ? 0 : 2,
+      holdings: Object.keys(unavailable).length ? 0 : 1,
+      transactions_ready: syncScenario !== "preparing",
+      unavailable,
+    });
     return;
   }
   if (path === "/v1/cycles/latest") {
@@ -219,6 +234,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (path === "/v1/reports/spending") {
+    if (
+      req.method === "POST" &&
+      ["preparing", "ready-empty"].includes(syncScenario)
+    ) {
+      send({ ...report, figures: [] }, 201);
+      return;
+    }
     if (scenario === "slow")
       await new Promise((resolve) => setTimeout(resolve, 1500));
     if (scenario === "error") {
