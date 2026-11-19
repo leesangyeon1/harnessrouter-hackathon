@@ -48,3 +48,10 @@ check "web_image_when_enabled" {
     error_message = "When deploy_web_service = true, web_image must be explicitly provided."
   }
 }
+
+check "admin_image_when_enabled" {
+  assert {
+    condition     = !var.deploy_admin_service || var.admin_image != ""
+    error_message = "When deploy_admin_service = true, admin_image must be explicitly provided."
+  }
+}

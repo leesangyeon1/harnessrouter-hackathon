@@ -2,7 +2,12 @@
 
 resource "google_service_account" "web" {
   account_id   = substr("hr-${var.environment}-web", 0, 28)
-  display_name = "${local.prefix} Next.js Web Service"
+  display_name = "${local.prefix} Next.js Customer Web Service"
+}
+
+resource "google_service_account" "admin" {
+  account_id   = substr("hr-${var.environment}-admin", 0, 28)
+  display_name = "${local.prefix} Next.js Operations Admin Service"
 }
 
 resource "google_service_account" "api" {
@@ -57,7 +62,8 @@ locals {
   }
 
   log_writers = merge(local.cloudsql_clients, {
-    web = google_service_account.web.email
+    web   = google_service_account.web.email
+    admin = google_service_account.admin.email
   })
 }
 
@@ -101,6 +107,7 @@ resource "google_project_iam_member" "cicd_run_developer" {
 locals {
   runtime_service_accounts = {
     web          = google_service_account.web.name
+    admin        = google_service_account.admin.name
     api          = google_service_account.api.name
     worker       = google_service_account.worker.name
     migrator     = google_service_account.migrator.name

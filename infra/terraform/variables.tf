@@ -75,7 +75,13 @@ variable "create_wif_pool" {
 }
 
 variable "deploy_web_service" {
-  description = "Enable Next.js Cloud Run service once apps/web image has been built and pushed."
+  description = "Enable Next.js Customer UI Cloud Run service once apps/web image has been built and pushed."
+  type        = bool
+  default     = false
+}
+
+variable "deploy_admin_service" {
+  description = "Enable Next.js Operations Admin Cloud Run service once apps/admin image has been built and pushed."
   type        = bool
   default     = false
 }
@@ -89,6 +95,18 @@ variable "api_image" {
 
 variable "web_image" {
   description = "Immutable Artifact Registry image URI for finance-web (required when deploy_web_service = true)."
+  type        = string
+  default     = ""
+}
+
+variable "admin_image" {
+  description = "Immutable Artifact Registry image URI for finance-admin (required when deploy_admin_service = true)."
+  type        = string
+  default     = ""
+}
+
+variable "admin_app_origin" {
+  description = "Exact public HTTPS origin of the operations service (no trailing slash) for strict CSRF Origin checks."
   type        = string
   default     = ""
 }
@@ -193,6 +211,31 @@ variable "web_min_instances" {
 variable "web_max_instances" {
   type    = number
   default = 10
+}
+
+variable "admin_cpu" {
+  type    = string
+  default = "1"
+}
+
+variable "admin_memory" {
+  type    = string
+  default = "512Mi"
+}
+
+variable "admin_concurrency" {
+  type    = number
+  default = 80
+}
+
+variable "admin_min_instances" {
+  type    = number
+  default = 0
+}
+
+variable "admin_max_instances" {
+  type    = number
+  default = 5
 }
 
 variable "api_cpu" {

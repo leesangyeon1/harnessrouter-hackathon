@@ -310,7 +310,7 @@ resource "google_cloud_run_v2_service_iam_member" "api_public_https" {
   member   = "allUsers"
 }
 
-# --- 3. Next.js Unified Customer + Admin UI Service ---
+# --- 3. Next.js Customer UI Service (`apps/web`) ---
 
 resource "google_cloud_run_v2_service" "web" {
   count = var.deploy_web_service ? 1 : 0
@@ -343,28 +343,15 @@ resource "google_cloud_run_v2_service" "web" {
         startup_cpu_boost = true
       }
 
-      # Server-only runtime env vars for Next.js SSR/route handlers.
       # ZERO Plaid, Alpaca, HarnessRouter, or DB secrets are mounted here.
       env {
         name  = "NODE_ENV"
         value = "production"
       }
-      env {
-        name  = "INTERNAL_API_BASE_URL"
-        value = google_cloud_run_v2_service.api.uri
-      }
-      env {
-        name  = "NEXT_PUBLIC_API_BASE_URL"
-        value = coalesce(var.next_public_api_base_url != "" ? var.next_public_api_base_url : null, google_cloud_run_v2_service.api.uri)
-      }
-      env {
-        name  = "NEXT_PUBLIC_IDENTITY_PROJECT_ID"
-        value = local.identity_project_id
-      }
 
       startup_probe {
-        tcp_socket {
-          port = 8080
+        http_get {
+          path = "/"
         }
         initial_delay_seconds = 1
         period_seconds        = 4
@@ -373,8 +360,8 @@ resource "google_cloud_run_v2_service" "web" {
       }
 
       liveness_probe {
-        tcp_socket {
-          port = 8080
+        http_get {
+          path = "/"
         }
         period_seconds    = 30
         timeout_seconds   = 3
@@ -392,6 +379,88 @@ resource "google_cloud_run_v2_service_iam_member" "web_public_https" {
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.web[0].name
+  role     = "roles/run.invoker"
+  member   = "allUsers"
+}
+
+# --- 4. Next.js Operations Admin Service (`apps/admin`) ---
+
+resource "google_cloud_run_v2_service" "admin" {
+  count = var.deploy_admin_service ? 1 : 0
+
+  name                = "${local.prefix}-admin"
+  location            = var.region
+  ingress             = "INGRESS_TRAFFIC_ALL"
+  deletion_protection = var.environment == "prod"
+  labels              = local.labels
+
+  template {
+    service_account                  = google_service_account.admin.email
+    max_instance_request_concurrency = var.admin_concurrency
+    timeout                          = "60s"
+
+    scaling {
+      min_instance_count = var.admin_min_instances
+      max_instance_count = var.admin_max_instances
+    }
+
+    containers {
+      image = var.admin_image
+
+      resources {
+        limits = {
+          cpu    = var.admin_cpu
+          memory = var.admin_memory
+        }
+        cpu_idle          = true
+        startup_cpu_boost = true
+      }
+
+      # Server-only runtime configuration per apps/web/HOSTING.md.
+      # ZERO DB credentials, provider secrets, or SA private keys mounted.
+      env {
+        name  = "NODE_ENV"
+        value = "production"
+      }
+      env {
+        name  = "INTERNAL_API_BASE_URL"
+        value = google_cloud_run_v2_service.api.uri
+      }
+      env {
+        name  = "ADMIN_APP_ORIGIN"
+        value = coalesce(var.admin_app_origin != "" ? var.admin_app_origin : null, "https://${local.prefix}-admin-${data.google_project.current.number}.${var.region}.run.app")
+      }
+
+      startup_probe {
+        http_get {
+          path = "/"
+        }
+        initial_delay_seconds = 1
+        period_seconds        = 4
+        timeout_seconds       = 3
+        failure_threshold     = 10
+      }
+
+      liveness_probe {
+        http_get {
+          path = "/"
+        }
+        period_seconds    = 30
+        timeout_seconds   = 3
+        failure_threshold = 3
+      }
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_cloud_run_v2_service_iam_member" "admin_public_https" {
+  count = var.deploy_admin_service ? 1 : 0
+
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.admin[0].name
   role     = "roles/run.invoker"
   member   = "allUsers"
 }

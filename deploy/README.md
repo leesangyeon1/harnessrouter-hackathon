@@ -7,8 +7,9 @@ This directory and `infra/terraform/` define the Google Cloud deployment archite
 ## 1. Architecture Topology
 
 ```text
-Browser (Customer UI + Admin Ops UI)
-  |-- HTTPS --> Cloud Run Service: hr-finance-<env>-web (Next.js standalone, public, NO backend secrets)
+Browser (Customer UI & Separate Operations UI)
+  |-- HTTPS --> Cloud Run Service: hr-finance-<env>-web   (apps/web Next.js Customer UI, public, NO backend secrets)
+  |-- HTTPS --> Cloud Run Service: hr-finance-<env>-admin (apps/admin Next.js Operations UI, HttpOnly session + CSRF origin check)
   |-- HTTPS + Identity Platform JWT --> Cloud Run Service: hr-finance-<env>-api (FastAPI)
                                           |-- /v1/*          : Identity Platform JWT + per-request DB role check
                                           |-- /v1/admin/*    : require_admin (PostgreSQL user_roles == 'admin')

@@ -14,8 +14,13 @@ output "worker_service_url" {
 }
 
 output "web_service_url" {
-  description = "Public HTTPS URL of the Next.js UI Cloud Run service (when deploy_web_service = true)."
+  description = "Public HTTPS URL of the Next.js Customer UI Cloud Run service (when deploy_web_service = true)."
   value       = var.deploy_web_service ? google_cloud_run_v2_service.web[0].uri : null
+}
+
+output "admin_service_url" {
+  description = "Public HTTPS URL of the Next.js Operations Admin Cloud Run service (when deploy_admin_service = true)."
+  value       = var.deploy_admin_service ? google_cloud_run_v2_service.admin[0].uri : null
 }
 
 output "cloud_sql_connection_name" {
