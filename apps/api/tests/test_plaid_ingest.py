@@ -10,6 +10,7 @@ import secrets
 import threading
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -24,6 +25,7 @@ from finance_api import plaid_probe
 from finance_api.app import app_from_env, create_app
 from finance_api.auth import IdTokenVerifier
 from finance_api.plaid import PlaidClient
+from finance_api.plaid_ingest import custom_user
 from finance_api.sealing import SecretBox
 
 MakeToken = Callable[..., str]
@@ -57,6 +59,8 @@ class FakePlaid:
         self.public_token = "public-sandbox-" + secrets.token_hex(4)
         self.requests: list[tuple[str, dict[str, Any]]] = []
         self.failing: str | None = None
+        self.refusals: dict[str, str] = {}
+        self.mutate_once_at = "never"
         self.all_read_together: threading.Barrier | None = None
         self.accounts: list[dict[str, Any]] = [
             {
@@ -95,6 +99,7 @@ class FakePlaid:
                 "removed": [],
                 "next_cursor": "c1",
                 "has_more": True,
+                "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
             },
             "c1": {
                 "added": [_transaction(3, 120.0, "TRAVEL", pending=True)],
@@ -102,6 +107,7 @@ class FakePlaid:
                 "removed": [],
                 "next_cursor": "c2",
                 "has_more": False,
+                "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
             },
             "c2": self.nothing_new("c2"),
         }
@@ -145,7 +151,24 @@ class FakePlaid:
             "removed": [],
             "next_cursor": cursor,
             "has_more": False,
+            "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
         }
+
+    @staticmethod
+    def not_ready() -> dict[str, Any]:
+        """What Plaid documents for an Item whose transactions it has not prepared yet."""
+        return {
+            "added": [],
+            "modified": [],
+            "removed": [],
+            "next_cursor": "",
+            "has_more": False,
+            "transactions_update_status": "NOT_READY",
+        }
+
+    def _page(self, body: dict[str, Any]) -> dict[str, Any]:
+        assert body.get("cursor") != "", "an empty cursor must be omitted, not sent"
+        return self.pages[body.get("cursor", "")]
 
     def client(self) -> PlaidClient:
         transport = httpx.MockTransport(self._answer)
@@ -161,6 +184,12 @@ class FakePlaid:
         assert (body["client_id"], body["secret"]) == (CLIENT_ID, PLAID_SECRET)
         if path == self.failing:
             return httpx.Response(400, json={"error_code": "INTERNAL_SERVER_ERROR"})
+        if path in self.refusals:
+            return httpx.Response(400, json={"error_code": self.refusals[path]})
+        if path == "/transactions/sync" and body.get("cursor") == self.mutate_once_at:
+            self.mutate_once_at = "never"
+            mutated = "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"
+            return httpx.Response(400, json={"error_code": mutated})
         if path == "/sandbox/public_token/create":
             return httpx.Response(200, json={"public_token": self.public_token})
         if path == "/item/public_token/exchange":
@@ -172,7 +201,7 @@ class FakePlaid:
             self.all_read_together.wait(timeout=10)
         answers: dict[str, Callable[[], dict[str, Any]]] = {
             "/accounts/get": lambda: {"accounts": self.accounts},
-            "/transactions/sync": lambda: self.pages[body.get("cursor", "")],
+            "/transactions/sync": lambda: self._page(body),
             "/liabilities/get": lambda: {
                 "liabilities": {"credit": self.credit, "student": self.student, "mortgage": []}
             },
@@ -290,7 +319,14 @@ def test_sync_stores_what_plaid_holds(
     response = client.post("/v1/plaid/sync", headers=signed_in)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"accounts": 4, "transactions": 3, "liabilities": 2, "holdings": 1}
+    assert response.json() == {
+        "accounts": 4,
+        "transactions": 3,
+        "liabilities": 2,
+        "holdings": 1,
+        "transactions_ready": True,
+        "unavailable": {},
+    }
     accounts, transactions, liabilities, holdings = _everything(migrator_url, user)
     assert accounts == [
         ("acc-brokerage", "investment", "brokerage", Decimal("4200.75")),
@@ -370,6 +406,7 @@ def test_item_with_no_transactions_syncs_to_an_empty_set(
     client: TestClient, plaid: FakePlaid, signed_in: dict[str, str], user: str, migrator_url: str
 ) -> None:
     plaid.pages[""] = plaid.nothing_new("c0")
+    plaid.pages["c0"] = plaid.nothing_new("c0")
     client.post("/v1/plaid/seed", headers=signed_in)
 
     response = client.post("/v1/plaid/sync", headers=signed_in)
@@ -377,6 +414,118 @@ def test_item_with_no_transactions_syncs_to_an_empty_set(
     assert response.status_code == 200
     assert response.json()["transactions"] == 0
     assert _counts(migrator_url, user)["plaid_transactions"] == 0
+
+
+def test_sync_says_when_plaid_has_not_prepared_the_transactions_and_starts_over_next_time(
+    client: TestClient, plaid: FakePlaid, signed_in: dict[str, str], user: str, migrator_url: str
+) -> None:
+    prepared = plaid.pages[""]
+    plaid.pages[""] = plaid.not_ready()
+    client.post("/v1/plaid/seed", headers=signed_in)
+
+    early = client.post("/v1/plaid/sync", headers=signed_in)
+
+    assert early.status_code == 200
+    assert (early.json()["transactions"], early.json()["transactions_ready"]) == (0, False)
+    assert _rows(migrator_url, user, "SELECT transactions_cursor FROM plaid_items") == [(None,)]
+
+    plaid.pages[""] = prepared
+    later = client.post("/v1/plaid/sync", headers=signed_in)
+
+    assert (later.json()["transactions"], later.json()["transactions_ready"]) == (3, True)
+    assert [body.get("cursor") for body in plaid.calls("/transactions/sync")] == [None, None, "c1"]
+
+
+def test_sync_starts_the_pagination_again_when_plaid_reports_a_change_during_it(
+    client: TestClient, plaid: FakePlaid, signed_in: dict[str, str], user: str, migrator_url: str
+) -> None:
+    plaid.mutate_once_at = "c1"
+    client.post("/v1/plaid/seed", headers=signed_in)
+
+    response = client.post("/v1/plaid/sync", headers=signed_in)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["transactions"] == 3
+    asked = [body.get("cursor") for body in plaid.calls("/transactions/sync")]
+    assert asked == [None, "c1", None, "c1"]
+
+
+def test_item_that_no_longer_has_liability_or_investment_accounts_keeps_none(
+    client: TestClient, plaid: FakePlaid, signed_in: dict[str, str], user: str, migrator_url: str
+) -> None:
+    client.post("/v1/plaid/seed", headers=signed_in)
+    client.post("/v1/plaid/sync", headers=signed_in)
+    plaid.refusals = {
+        "/liabilities/get": "NO_LIABILITY_ACCOUNTS",
+        "/investments/holdings/get": "NO_INVESTMENT_ACCOUNTS",
+    }
+
+    response = client.post("/v1/plaid/sync", headers=signed_in)
+
+    assert response.status_code == 200, response.text
+    assert (response.json()["liabilities"], response.json()["holdings"]) == (0, 0)
+    assert response.json()["unavailable"] == {}
+    assert response.json()["transactions"] == 3
+
+
+@pytest.mark.parametrize(
+    "refusal", ["PRODUCT_NOT_ENABLED", "PRODUCTS_NOT_SUPPORTED", "PRODUCT_NOT_READY"]
+)
+def test_product_plaid_cannot_serve_is_named_and_what_was_stored_for_it_is_left(
+    client: TestClient,
+    plaid: FakePlaid,
+    signed_in: dict[str, str],
+    user: str,
+    migrator_url: str,
+    refusal: str,
+) -> None:
+    client.post("/v1/plaid/seed", headers=signed_in)
+    client.post("/v1/plaid/sync", headers=signed_in)
+    plaid.refusals = {"/liabilities/get": refusal, "/investments/holdings/get": refusal}
+
+    response = client.post("/v1/plaid/sync", headers=signed_in)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["unavailable"] == {"liabilities": refusal, "holdings": refusal}
+    assert _counts(migrator_url, user) == {
+        "plaid_accounts": 4,
+        "plaid_transactions": 3,
+        "plaid_liabilities": 2,
+        "plaid_holdings": 1,
+    }
+
+
+def test_seed_configuration_follows_plaids_custom_user_schema() -> None:
+    today = date(2027, 6, 1)
+
+    accounts = custom_user(today)["override_accounts"]
+
+    assert len(accounts) <= 10
+    transactions = [entry for account in accounts for entry in account.get("transactions", [])]
+    assert transactions, "the spending demo needs transactions"
+    for entry in transactions:
+        assert set(entry) == {"date_transacted", "date_posted", "amount", "description", "currency"}
+        posted = date.fromisoformat(entry["date_posted"])
+        # Not in the future, which Plaid would hold as pending, and inside the 90 days of
+        # history Plaid returns by default (F8).
+        assert timedelta(days=1) <= today - posted <= timedelta(days=90)
+    liabilities = [account["liability"] for account in accounts if "liability" in account]
+    assert {liability["type"] for liability in liabilities} <= {
+        "credit",
+        "student",
+        "loan",
+        "line_of_credit",
+    }
+    for liability in liabilities:
+        if liability["type"] == "loan":
+            assert set(liability["interest_rate"]) == {"percentage", "type"}
+            assert liability["interest_rate"]["type"] in ("fixed", "variable")
+            assert "nominal_apr" not in liability
+        if liability["type"] == "credit":
+            assert 0 <= liability["purchase_apr"] <= 100
+    for account in accounts:
+        for holding in account.get("holdings", []):
+            assert {"ticker_symbol", "currency"} <= set(holding["security"])
 
 
 def test_later_sync_applies_modified_and_removed_transactions(
@@ -390,6 +539,7 @@ def test_later_sync_applies_modified_and_removed_transactions(
         "removed": [{"transaction_id": "tx-2"}],
         "next_cursor": "c3",
         "has_more": False,
+        "transactions_update_status": "HISTORICAL_UPDATE_COMPLETE",
     }
     plaid.pages["c3"] = plaid.nothing_new("c3")
 
@@ -497,6 +647,7 @@ def test_probe_reads_a_seeded_item_back_and_prints_no_credential(plaid: FakePlai
     assert report["transactions"] == {
         "count": 3,
         "attempts": 1,
+        "ready": True,
         "without_category": 1,
         "pending": 1,
     }
@@ -510,7 +661,7 @@ def test_probe_reads_a_seeded_item_back_and_prints_no_credential(plaid: FakePlai
 
 def test_probe_waits_for_transactions_that_are_not_ready_at_once(plaid: FakePlaid) -> None:
     ready = plaid.pages[""]
-    plaid.pages[""] = plaid.nothing_new("")
+    plaid.pages[""] = plaid.not_ready()
     waits: list[float] = []
 
     def wait(seconds: float) -> None:
@@ -525,11 +676,12 @@ def test_probe_waits_for_transactions_that_are_not_ready_at_once(plaid: FakePlai
 
 
 def test_probe_gives_up_when_no_transaction_ever_arrives(plaid: FakePlaid) -> None:
-    plaid.pages[""] = plaid.nothing_new("")
+    plaid.pages[""] = plaid.not_ready()
 
     report = plaid_probe.probe(plaid.client(), CUSTOM_USER, pause=_no_wait, attempts=3)
 
     assert (report["transactions"]["count"], report["transactions"]["attempts"]) == (0, 3)
+    assert report["transactions"]["ready"] is False
     assert report["spending_demo_ready"] is False
 
 

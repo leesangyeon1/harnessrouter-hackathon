@@ -18,8 +18,8 @@ from collections.abc import Callable
 from finance_api.plaid import PlaidClient, PlaidError, Row, plaid_client_from_env
 from finance_api.plaid_ingest import custom_user
 
-# Sandbox prepares an Item's transactions after it creates the Item, so the first read can be
-# empty. Assumed; U0 (a) is what measures how long it takes.
+# Plaid prepares an Item's transactions after it creates the Item, and says so with an update
+# status. How long that takes in the Sandbox is not documented; these two numbers are assumed.
 ATTEMPTS = 6
 PAUSE_SECONDS = 5.0
 
@@ -48,14 +48,15 @@ def probe(
         changed: list[Row] = []
         cursor = None
         for attempt in range(1, attempts + 1):
-            more, _, cursor = plaid.transactions_since(access_token, cursor)
+            more, _, cursor, ready = plaid.transactions_since(access_token, cursor)
             changed += more
-            if changed or attempt == attempts:
+            if ready or attempt == attempts:
                 break
             pause(PAUSE_SECONDS)
         return {
             "count": len(changed),
             "attempts": attempt,
+            "ready": ready,
             "without_category": sum(t.get("personal_finance_category") is None for t in changed),
             "pending": sum(bool(t.get("pending")) for t in changed),
         }

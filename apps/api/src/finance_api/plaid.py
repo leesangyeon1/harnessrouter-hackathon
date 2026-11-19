@@ -1,7 +1,7 @@
 """Plaid Sandbox client (U2). The Sandbox is the only Plaid host this service talks to (I1).
 
-The endpoints and fields are taken from Plaid's documentation. None has been checked against
-the Sandbox itself; U0 (a) does that.
+The endpoints and fields follow Plaid's documentation as Research Expert read it on 2026-11-18.
+None has been checked against the Sandbox itself; `python -m finance_api.plaid_probe` does that.
 """
 
 import json
@@ -13,6 +13,9 @@ import httpx
 
 SANDBOX_HOST = "sandbox.plaid.com"
 SANDBOX_INSTITUTION = "ins_109508"
+TRANSACTIONS_READY = ("INITIAL_UPDATE_COMPLETE", "HISTORICAL_UPDATE_COMPLETE")
+MUTATION_DURING_PAGINATION = "TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION"
+PAGINATION_RESTARTS = 3
 
 Row = dict[str, Any]
 
@@ -75,18 +78,40 @@ class PlaidClient:
 
     def transactions_since(
         self, access_token: str, cursor: str | None
-    ) -> tuple[list[Row], list[str], str]:
-        """Every change after the cursor: added or modified, removed ids, and the next cursor."""
+    ) -> tuple[list[Row], list[str], str | None, bool]:
+        """Every change after the cursor: rows added or modified, ids removed, the next cursor,
+        and whether Plaid has finished preparing the Item's transactions.
+
+        Plaid prepares transactions after it creates an Item. Until then it answers with no
+        rows and an empty cursor, returned here as None so that the next call starts over.
+        """
+        restarts = 0
+        while True:
+            try:
+                return self._changes(access_token, cursor)
+            except PlaidError as refused:
+                # The data changed between pages. Plaid's rule: start the batch again from
+                # its first cursor, never from the page that failed.
+                if refused.code != MUTATION_DURING_PAGINATION or restarts == PAGINATION_RESTARTS:
+                    raise
+                restarts += 1
+
+    def _changes(
+        self, access_token: str, start: str | None
+    ) -> tuple[list[Row], list[str], str | None, bool]:
         changed: list[Row] = []
         removed: list[str] = []
+        cursor = start
         while True:
-            body = {"access_token": access_token} | ({} if cursor is None else {"cursor": cursor})
+            # A first call omits the cursor. Plaid does not say an empty one means the same.
+            body = {"access_token": access_token} | ({"cursor": cursor} if cursor else {})
             page = self._post("/transactions/sync", body)
             changed += [*page["added"], *page["modified"]]
             removed += [gone["transaction_id"] for gone in page["removed"]]
             cursor = page["next_cursor"]
             if not page["has_more"]:
-                return changed, removed, cursor
+                ready = page.get("transactions_update_status") in TRANSACTIONS_READY
+                return changed, removed, cursor or None, ready
 
     def liabilities(self, access_token: str) -> Row:
         liabilities: Row = self._post("/liabilities/get", {"access_token": access_token})[

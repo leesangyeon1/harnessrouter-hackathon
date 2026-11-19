@@ -19,11 +19,36 @@
         "minimum_payment_amount": 60
       },
       "transactions": [
-        {"date_transacted": "2026-10-03", "date_posted": "2026-10-04", "currency": "USD", "amount": 84.2, "description": "Grocery store"},
-        {"date_transacted": "2026-10-09", "date_posted": "2026-10-10", "currency": "USD", "amount": 46.5, "description": "Gas station"},
-        {"date_transacted": "2026-10-17", "date_posted": "2026-10-18", "currency": "USD", "amount": 129.99, "description": "Airline ticket"},
-        {"date_transacted": "2026-11-02", "date_posted": "2026-11-03", "currency": "USD", "amount": 91.75, "description": "Grocery store"},
-        {"date_transacted": "2026-11-08", "date_posted": "2026-11-09", "currency": "USD", "amount": 38.4, "description": "Restaurant"}
+        {
+          "currency": "USD",
+          "amount": 84.2,
+          "description": "Grocery store",
+          "days_ago": 47
+        },
+        {
+          "currency": "USD",
+          "amount": 46.5,
+          "description": "Gas station",
+          "days_ago": 41
+        },
+        {
+          "currency": "USD",
+          "amount": 129.99,
+          "description": "Airline ticket",
+          "days_ago": 33
+        },
+        {
+          "currency": "USD",
+          "amount": 91.75,
+          "description": "Grocery store",
+          "days_ago": 17
+        },
+        {
+          "currency": "USD",
+          "amount": 38.4,
+          "description": "Restaurant",
+          "days_ago": 11
+        }
       ]
     },
     {
@@ -58,10 +83,13 @@
     },
     {
       "type": "loan",
-      "subtype": "consumer",
+      "subtype": "loan",
       "liability": {
         "type": "loan",
-        "interest_rate": 11.5,
+        "interest_rate": {
+          "percentage": 11.5,
+          "type": "fixed"
+        },
         "principal_balance": 9000,
         "loan_term_months": 48,
         "maturity_date": "2029-06-01"
@@ -77,7 +105,10 @@
           "cost_basis": 250,
           "quantity": 10,
           "currency": "USD",
-          "security": {"ticker_symbol": "VTI", "currency": "USD"}
+          "security": {
+            "ticker_symbol": "VTI",
+            "currency": "USD"
+          }
         },
         {
           "institution_price": 73,
@@ -85,7 +116,10 @@
           "cost_basis": 75,
           "quantity": 20,
           "currency": "USD",
-          "security": {"ticker_symbol": "BND", "currency": "USD"}
+          "security": {
+            "ticker_symbol": "BND",
+            "currency": "USD"
+          }
         }
       ]
     }
