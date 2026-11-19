@@ -159,11 +159,13 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
 
+      - uses: google-github-actions/setup-gcloud@v2
+
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
 
-      - name: Terraform Init & Plan
+      - name: Terraform Init, Adopt Existing Web Service & Plan
         working-directory: infra/terraform
         run: |
           REPO="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${NAME_PREFIX}-${ENV_NAME}-containers"
@@ -171,6 +173,26 @@ jobs:
           terraform init \
             -backend-config="bucket=${TF_STATE_BUCKET}" \
             -backend-config="prefix=${NAME_PREFIX}/${ENV_NAME}"
+
+          if gcloud run services describe "${NAME_PREFIX}-${ENV_NAME}-web" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" >/dev/null 2>&1; then
+            if ! terraform state show 'google_cloud_run_v2_service.web[0]' >/dev/null 2>&1; then
+              terraform import \
+                -var="project_id=${GCP_PROJECT_ID}" \
+                -var="region=${GCP_REGION}" \
+                -var="environment=${ENV_NAME}" \
+                -var="api_image=${REPO}/finance-api:${GITHUB_SHA}" \
+                -var="deploy_web_service=true" \
+                -var="web_image=${REPO}/finance-web:${GITHUB_SHA}" \
+                -var="deploy_admin_service=true" \
+                -var="admin_image=${REPO}/finance-admin:${GITHUB_SHA}" \
+                -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
+                -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+                -var="db_tier=${DB_TIER}" \
+                'google_cloud_run_v2_service.web[0]' \
+                "projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/services/${NAME_PREFIX}-${ENV_NAME}-web"
+            fi
+          fi
+
           terraform plan \
             -var="project_id=${GCP_PROJECT_ID}" \
             -var="region=${GCP_REGION}" \
