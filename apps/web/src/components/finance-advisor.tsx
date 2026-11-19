@@ -30,7 +30,30 @@ import {
   computeBalanceTransferComparison,
   computeRefinanceComparison,
 } from "@/lib/calculator";
+import { AgentRunProgress, ReportCompletedBar } from "./agent-progress";
 import "./finance-advisor.css";
+
+function parseUsdAmount(formatted: string): number {
+  const cleaned = Number(formatted.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(cleaned) && cleaned > 0 ? cleaned : 0;
+}
+
+function detectAdvisorSectionPills(markdown: string): string[] {
+  const lower = markdown.toLowerCase();
+  const found: string[] = [];
+  if (lower.includes("summary")) found.push("Summary");
+  if (lower.includes("input") || lower.includes("verif"))
+    found.push("Inputs & Verification");
+  if (lower.includes("comparison") || markdown.includes("|"))
+    found.push("Comparison Table");
+  if (lower.includes("tradeoff") || lower.includes("recommend"))
+    found.push("Tradeoffs & Recommendation");
+  if (lower.includes("next step") || lower.includes("missing"))
+    found.push("Next Steps");
+  return found.length > 0
+    ? found
+    : ["Verified Analysis", "Structured Report"];
+}
 
 function isTerminal(status: AgentTask["status"]): boolean {
   return (
@@ -253,6 +276,7 @@ export function FinanceAdvisor({
     "Starting financial analysis…",
   );
   const [streamDelta, setStreamDelta] = useState("");
+  const [eventCount, setEventCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -307,6 +331,7 @@ export function FinanceAdvisor({
       streamAbortRef.current = abort;
       setActivityLabel("Connecting to finance advisor…");
       setStreamDelta("");
+      setEventCount(0);
 
       try {
         await client.streamAgentTaskEvents(
@@ -314,6 +339,7 @@ export function FinanceAdvisor({
           (ev) => {
             if (ev.kind === "activity") {
               setActivityLabel(ev.label);
+              setEventCount((prev) => prev + 1);
             } else if (ev.kind === "text") {
               setStreamDelta((prev) => (prev + ev.delta).slice(-1400));
             }
@@ -565,6 +591,55 @@ export function FinanceAdvisor({
                     />
                   </label>
                 </div>
+                {(() => {
+                  const curVal = parseUsdAmount(
+                    cardCalcPreview.optionCurrent.totalCostUsd,
+                  );
+                  const trfVal = parseUsdAmount(
+                    cardCalcPreview.optionTransfer.totalCostUsd,
+                  );
+                  const maxVal = Math.max(1, curVal, trfVal);
+                  return curVal > 0 && trfVal > 0 ? (
+                    <div className="calc-visual-bars">
+                      <div className="calc-bar-row">
+                        <div className="calc-bar-label-line">
+                          <span>Current card total cost</span>
+                          <strong>
+                            {cardCalcPreview.optionCurrent.totalCostUsd}
+                          </strong>
+                        </div>
+                        <div className="metric-mini-track">
+                          <div
+                            className={`metric-mini-fill ${
+                              curVal <= trfVal ? "good" : "warn"
+                            }`}
+                            style={{
+                              width: `${Math.round((curVal / maxVal) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="calc-bar-row">
+                        <div className="calc-bar-label-line">
+                          <span>0% Balance transfer total cost</span>
+                          <strong>
+                            {cardCalcPreview.optionTransfer.totalCostUsd}
+                          </strong>
+                        </div>
+                        <div className="metric-mini-track">
+                          <div
+                            className={`metric-mini-fill ${
+                              trfVal <= curVal ? "good" : "warn"
+                            }`}
+                            style={{
+                              width: `${Math.round((trfVal / maxVal) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
                 <div className="advisor-calc-summary">
                   <span>
                     Verified preview: Current total{" "}
@@ -655,6 +730,61 @@ export function FinanceAdvisor({
                     />
                   </label>
                 </div>
+                {(() => {
+                  const curLoanVal = parseUsdAmount(
+                    refiCalcPreview.currentLoan.totalOutOfPocketUsd,
+                  );
+                  const refiLoanVal = parseUsdAmount(
+                    refiCalcPreview.refiOffer.totalOutOfPocketUsd,
+                  );
+                  const maxLoanVal = Math.max(1, curLoanVal, refiLoanVal);
+                  return curLoanVal > 0 && refiLoanVal > 0 ? (
+                    <div className="calc-visual-bars">
+                      <div className="calc-bar-row">
+                        <div className="calc-bar-label-line">
+                          <span>Current loan remaining out-of-pocket</span>
+                          <strong>
+                            {refiCalcPreview.currentLoan.totalOutOfPocketUsd} (
+                            {refiCalcPreview.currentLoan.monthlyPaymentUsd}/mo)
+                          </strong>
+                        </div>
+                        <div className="metric-mini-track">
+                          <div
+                            className={`metric-mini-fill ${
+                              curLoanVal <= refiLoanVal ? "good" : "warn"
+                            }`}
+                            style={{
+                              width: `${Math.round(
+                                (curLoanVal / maxLoanVal) * 100,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="calc-bar-row">
+                        <div className="calc-bar-label-line">
+                          <span>Refinance offer total out-of-pocket</span>
+                          <strong>
+                            {refiCalcPreview.refiOffer.totalOutOfPocketUsd} (
+                            {refiCalcPreview.refiOffer.monthlyPaymentUsd}/mo)
+                          </strong>
+                        </div>
+                        <div className="metric-mini-track">
+                          <div
+                            className={`metric-mini-fill ${
+                              refiLoanVal <= curLoanVal ? "good" : "warn"
+                            }`}
+                            style={{
+                              width: `${Math.round(
+                                (refiLoanVal / maxLoanVal) * 100,
+                              )}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
                 <div className="advisor-calc-summary">
                   <span>
                     Verified preview: Monthly Δ{" "}
@@ -745,32 +875,22 @@ export function FinanceAdvisor({
       )}
 
       {running && activeTask && (
-        <section className="panel advisor-progress-panel" role="status">
-          <div className="advisor-progress-top">
-            <span className="advisor-progress-status">
-              <LoaderCircle size={18} className="spin" />
-              {activityLabel}
-            </span>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => void cancelActive()}
-            >
-              Cancel
-            </button>
-          </div>
-          <p className="small muted">
-            Comparing: <strong>{summarizeQueryTitle(activeTask.query)}</strong>{" "}
-            (analysis can take up to a minute)
-          </p>
-          {streamDelta && (
-            <pre className="advisor-stream-box">{streamDelta}</pre>
-          )}
-        </section>
+        <AgentRunProgress
+          key={activeTask.id}
+          variant="advisor"
+          activityLabel={activityLabel}
+          queryTitle={summarizeQueryTitle(activeTask.query)}
+          streamDelta={streamDelta}
+          eventCount={eventCount}
+          onCancel={() => void cancelActive()}
+        />
       )}
 
       {activeTask && isTerminal(activeTask.status) && (
-        <section className="panel">
+        <section
+          className="panel report-reveal-panel"
+          key={`report-${activeTask.id}-${activeTask.status}`}
+        >
           <div className="card-heading">
             <div>
               <span className="eyebrow">ADVISOR COMPARISON REPORT</span>
@@ -787,6 +907,13 @@ export function FinanceAdvisor({
               {activeTask.status}
             </span>
           </div>
+
+          {activeTask.status === "completed" && activeTask.answer && (
+            <ReportCompletedBar
+              label="Verified financial comparison report complete"
+              pills={detectAdvisorSectionPills(activeTask.answer)}
+            />
+          )}
 
           {activeTask.status === "failed" && (
             <p className="coral-text small">

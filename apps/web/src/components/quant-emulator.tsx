@@ -28,6 +28,7 @@ import type {
   QuantEvaluationBundle,
   QuantEvaluationItem,
 } from "@/lib/api";
+import { AgentRunProgress, ReportCompletedBar } from "./agent-progress";
 import "./quant-emulator.css";
 
 const QUICK_SYMBOLS = ["AAPL", "TLT", "BTC/USD", "NVDA", "IEF"];
@@ -44,12 +45,19 @@ function isTerminal(status: AgentTask["status"]): boolean {
 type NormalizedCandidateRow = {
   modelId: string;
   selReturn: string;
+  selReturnNum: number | null;
   selSharpe: string;
   selDrawdown: string;
+  selDrawdownNum: number | null;
   confReturn: string;
+  confReturnNum: number | null;
   confSharpe: string;
   confDrawdown: string;
 };
+
+function asFiniteNum(val: unknown): number | null {
+  return typeof val === "number" && Number.isFinite(val) ? val : null;
+}
 
 function fmtPct(val: unknown): string {
   if (typeof val !== "number" || !Number.isFinite(val)) return "—";
@@ -99,9 +107,12 @@ function normalizeCandidateMetrics(
       rows.push({
         modelId,
         selReturn: fmtPct(sel.net_return),
+        selReturnNum: asFiniteNum(sel.net_return),
         selSharpe: fmtNum(sel.sharpe),
         selDrawdown: fmtPct(sel.max_drawdown),
+        selDrawdownNum: asFiniteNum(sel.max_drawdown),
         confReturn: fmtPct(conf.net_return),
+        confReturnNum: asFiniteNum(conf.net_return),
         confSharpe: fmtNum(conf.sharpe),
         confDrawdown: fmtPct(conf.max_drawdown),
       });
@@ -113,9 +124,12 @@ function normalizeCandidateMetrics(
       rows.push({
         modelId: key,
         selReturn: fmtPct(sel.net_return),
+        selReturnNum: asFiniteNum(sel.net_return),
         selSharpe: fmtNum(sel.sharpe),
         selDrawdown: fmtPct(sel.max_drawdown),
+        selDrawdownNum: asFiniteNum(sel.max_drawdown),
         confReturn: fmtPct(conf.net_return),
+        confReturnNum: asFiniteNum(conf.net_return),
         confSharpe: fmtNum(conf.sharpe),
         confDrawdown: fmtPct(conf.max_drawdown),
       });
@@ -168,6 +182,7 @@ export function QuantEmulator({
     "Starting isolated CPU quant evaluation…",
   );
   const [streamDelta, setStreamDelta] = useState("");
+  const [eventCount, setEventCount] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
@@ -186,6 +201,7 @@ export function QuantEmulator({
       streamAbortRef.current = abort;
       setActivityLabel("Connecting to CPU quant evaluator…");
       setStreamDelta("");
+      setEventCount(0);
 
       try {
         await client.streamAgentTaskEvents(
@@ -193,6 +209,7 @@ export function QuantEmulator({
           (ev) => {
             if (ev.kind === "activity") {
               setActivityLabel(ev.label);
+              setEventCount((prev) => prev + 1);
             } else if (ev.kind === "text") {
               setStreamDelta((prev) => (prev + ev.delta).slice(-1400));
             }
@@ -534,32 +551,22 @@ export function QuantEmulator({
       )}
 
       {running && activeTask && (
-        <section className="panel advisor-progress-panel" role="status">
-          <div className="advisor-progress-top">
-            <span className="advisor-progress-status">
-              <LoaderCircle size={18} className="spin" />
-              {activityLabel}
-            </span>
-            <button
-              type="button"
-              className="button secondary"
-              onClick={() => void cancelActive()}
-            >
-              Cancel
-            </button>
-          </div>
-          <p className="small muted">
-            Executing isolated CPU backtest:{" "}
-            <strong>{activeTask.query}</strong>
-          </p>
-          {streamDelta && (
-            <pre className="quant-stream-preview">{streamDelta}</pre>
-          )}
-        </section>
+        <AgentRunProgress
+          key={activeTask.id}
+          variant="quant"
+          activityLabel={activityLabel}
+          queryTitle={activeTask.query}
+          streamDelta={streamDelta}
+          eventCount={eventCount}
+          onCancel={() => void cancelActive()}
+        />
       )}
 
       {activeTask && isTerminal(activeTask.status) && (
-        <section className="panel">
+        <section
+          className="panel report-reveal-panel"
+          key={`quant-report-${activeTask.id}-${activeTask.status}`}
+        >
           <div className="card-heading">
             <div>
               <span className="eyebrow">
@@ -582,6 +589,19 @@ export function QuantEmulator({
                 : activeTask.status}
             </span>
           </div>
+
+          {activeTask.status === "completed" && quantResult && (
+            <ReportCompletedBar
+              label="Isolated CPU strategy backtest & SHA-256 verification complete"
+              pills={[
+                "SHA-256 Hashes Verified",
+                "Daily-v1 Executed",
+                "Stable ≤20% DD Checked",
+                "60-Bar Confirmation Gate",
+                "SIMULATED Output Sealed",
+              ]}
+            />
+          )}
 
           {activeTask.status === "failed" && (
             <p className="coral-text small">
@@ -614,13 +634,26 @@ export function QuantEmulator({
                     ? extractMetricsPair(evItem.baseline)
                     : null;
 
+                const maxAbsSelRet = Math.max(
+                  0.01,
+                  ...candidates.map((c) => Math.abs(c.selReturnNum ?? 0)),
+                );
+                const maxAbsConfRet = Math.max(
+                  0.01,
+                  ...candidates.map((c) => Math.abs(c.confReturnNum ?? 0)),
+                );
+
                 return (
                   <div
                     className="quant-eval-card"
                     key={`${evItem.cycle_id ?? "c"}-${evItem.symbol ?? idx}`}
                   >
                     <div className="quant-winners-grid">
-                      <div className="quant-winner-box">
+                      <div
+                        className={`quant-winner-box ${
+                          evItem.stable_winner ? "winner-confirmed" : ""
+                        }`}
+                      >
                         <span className="eyebrow">STABLE MODE WINNER</span>
                         <div className="quant-winner-id">
                           {evItem.stable_winner ?? "None (null)"}
@@ -630,7 +663,11 @@ export function QuantEmulator({
                           confirmation
                         </span>
                       </div>
-                      <div className="quant-winner-box">
+                      <div
+                        className={`quant-winner-box ${
+                          evItem.aggressive_winner ? "winner-confirmed" : ""
+                        }`}
+                      >
                         <span className="eyebrow">AGGRESSIVE MODE WINNER</span>
                         <div className="quant-winner-id">
                           {evItem.aggressive_winner ?? "None (null)"}
@@ -672,8 +709,8 @@ export function QuantEmulator({
                               <th>Model</th>
                               <th>Sel. Return</th>
                               <th>Sel. Sharpe</th>
-                              <th>Sel. Max DD</th>
-                              <th>Conf. Return</th>
+                              <th>Sel. Max DD (vs 20% Cap)</th>
+                              <th>60-Bar Conf. Return</th>
                               <th>Conf. Sharpe</th>
                               <th>Winner</th>
                             </tr>
@@ -684,6 +721,48 @@ export function QuantEmulator({
                                 evItem.stable_winner === row.modelId;
                               const wonAggr =
                                 evItem.aggressive_winner === row.modelId;
+                              const selBarPct =
+                                row.selReturnNum !== null
+                                  ? Math.max(
+                                      6,
+                                      Math.min(
+                                        100,
+                                        Math.round(
+                                          (Math.abs(row.selReturnNum) /
+                                            maxAbsSelRet) *
+                                            100,
+                                        ),
+                                      ),
+                                    )
+                                  : 0;
+                              const ddAbs =
+                                row.selDrawdownNum !== null
+                                  ? Math.abs(row.selDrawdownNum)
+                                  : null;
+                              const ddBarPct =
+                                ddAbs !== null
+                                  ? Math.max(
+                                      6,
+                                      Math.min(
+                                        100,
+                                        Math.round((ddAbs / 0.3) * 100),
+                                      ),
+                                    )
+                                  : 0;
+                              const confBarPct =
+                                row.confReturnNum !== null
+                                  ? Math.max(
+                                      6,
+                                      Math.min(
+                                        100,
+                                        Math.round(
+                                          (Math.abs(row.confReturnNum) /
+                                            maxAbsConfRet) *
+                                            100,
+                                        ),
+                                      ),
+                                    )
+                                  : 0;
                               return (
                                 <tr key={row.modelId}>
                                   <td>
@@ -691,17 +770,71 @@ export function QuantEmulator({
                                       {row.modelId}
                                     </span>
                                   </td>
-                                  <td className="strong">{row.selReturn}</td>
+                                  <td>
+                                    <div className="metric-mini-cell">
+                                      <strong
+                                        className={
+                                          (row.selReturnNum ?? 0) < 0
+                                            ? "coral-text"
+                                            : "positive"
+                                        }
+                                      >
+                                        {row.selReturn}
+                                      </strong>
+                                      {row.selReturnNum !== null && (
+                                        <div className="metric-mini-track">
+                                          <div
+                                            className={`metric-mini-fill ${
+                                              row.selReturnNum >= 0
+                                                ? "good"
+                                                : "warn"
+                                            }`}
+                                            style={{ width: `${selBarPct}%` }}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
                                   <td>{row.selSharpe}</td>
-                                  <td>{row.selDrawdown}</td>
-                                  <td
-                                    className={
-                                      row.confReturn.startsWith("-")
-                                        ? "coral-text"
-                                        : "positive"
-                                    }
-                                  >
-                                    {row.confReturn}
+                                  <td>
+                                    <div className="metric-mini-cell">
+                                      <span>{row.selDrawdown}</span>
+                                      {ddAbs !== null && (
+                                        <div className="metric-mini-track">
+                                          <div
+                                            className={`metric-mini-fill ${
+                                              ddAbs <= 0.2 ? "good" : "warn"
+                                            }`}
+                                            style={{ width: `${ddBarPct}%` }}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <div className="metric-mini-cell">
+                                      <span
+                                        className={
+                                          row.confReturn.startsWith("-")
+                                            ? "coral-text"
+                                            : "positive"
+                                        }
+                                      >
+                                        {row.confReturn}
+                                      </span>
+                                      {row.confReturnNum !== null && (
+                                        <div className="metric-mini-track">
+                                          <div
+                                            className={`metric-mini-fill ${
+                                              row.confReturnNum > 0
+                                                ? "good"
+                                                : "warn"
+                                            }`}
+                                            style={{ width: `${confBarPct}%` }}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
                                   </td>
                                   <td>{row.confSharpe}</td>
                                   <td>

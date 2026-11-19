@@ -1,0 +1,496 @@
+.agent-progress-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #cfe0d5;
+  background: linear-gradient(180deg, #ffffff 0%, #f6faf7 100%);
+  border-radius: 18px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 10px 28px rgba(22, 75, 52, 0.06);
+  animation: agentPanelFadeIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.agent-progress-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #1f6a4a 0%, #3ca374 50%, #1f6a4a 100%);
+  background-size: 200% 100%;
+  animation: agentTopGlow 2.2s linear infinite;
+}
+
+.agent-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.agent-progress-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.agent-pulse-orb {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: #e7f3ec;
+  color: #164b34;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.agent-pulse-orb::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 15px;
+  border: 2px solid rgba(31, 106, 74, 0.32);
+  animation: agentOrbPulse 1.8s ease-out infinite;
+}
+
+.agent-progress-eyebrow {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #164b34;
+}
+
+.agent-progress-status-text {
+  font-size: 0.98rem;
+  font-weight: 650;
+  color: #162019;
+  margin: 2px 0 0;
+}
+
+.agent-progress-meta-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.agent-progress-telemetry {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: #edf4ef;
+  border: 1px solid #d1dfd5;
+  font-size: 0.79rem;
+  font-weight: 600;
+  color: #1b3b2b;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-progress-pct {
+  font-size: 1.05rem;
+  font-weight: 750;
+  color: #164b34;
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: right;
+}
+
+.agent-bar-track {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: #e5ece7;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(20, 32, 24, 0.08);
+}
+
+.agent-bar-fill {
+  position: relative;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #18543a 0%, #1f6a4a 55%, #2f8f65 100%);
+  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  overflow: hidden;
+}
+
+.agent-bar-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.38) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  transform: translateX(-100%);
+  animation: agentBarShimmer 1.65s ease-in-out infinite;
+}
+
+.agent-stages-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-stage-step {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid #e1e6df;
+  background: #fafbf9;
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    transform 0.25s ease;
+  min-width: 0;
+}
+
+.agent-stage-step.done {
+  background: #eef6f1;
+  border-color: #c2dccb;
+}
+
+.agent-stage-step.active {
+  background: #ffffff;
+  border-color: #1f6a4a;
+  box-shadow: 0 4px 12px rgba(31, 106, 74, 0.1);
+  transform: translateY(-1px);
+}
+
+.agent-stage-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #3d4840;
+}
+
+.agent-stage-step.done .agent-stage-top {
+  color: #164b34;
+}
+
+.agent-stage-step.active .agent-stage-top {
+  color: #13422e;
+}
+
+.agent-stage-index {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #e6ebe5;
+  color: #364139;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.69rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.agent-stage-desc {
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #4b564e;
+  overflow-wrap: anywhere;
+}
+
+.agent-query-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: #3c463e;
+}
+
+.agent-live-stream-wrap {
+  border-radius: 12px;
+  border: 1px solid #d6e0d8;
+  background: #141c17;
+  color: #e6f2ea;
+  overflow: hidden;
+}
+
+.agent-live-stream-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 12px;
+  background: #1c2720;
+  border-bottom: 1px solid #2a392f;
+  font-size: 0.73rem;
+  font-weight: 600;
+  color: #b9d4c3;
+}
+
+.agent-live-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #4ade80;
+  margin-right: 6px;
+  animation: agentBlink 1.1s ease-in-out infinite;
+}
+
+.agent-live-stream-pre {
+  margin: 0;
+  padding: 11px 13px;
+  max-height: 185px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.79rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #e6f2ea;
+}
+
+.agent-stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 3px;
+  vertical-align: text-bottom;
+  background: #4ade80;
+  animation: agentBlink 0.9s steps(2, start) infinite;
+}
+
+/* Completed report reveal & embedded progress bars */
+.report-reveal-panel {
+  animation: reportSlideUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.report-complete-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 14px;
+  margin-bottom: 14px;
+  border-radius: 13px;
+  background: linear-gradient(90deg, #eef6f1 0%, #f6faf7 100%);
+  border: 1px solid #c9dfd1;
+}
+
+.report-complete-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #164b34;
+}
+
+.report-complete-track {
+  width: 100%;
+  height: 7px;
+  border-radius: 999px;
+  background: #d8e8de;
+  overflow: hidden;
+}
+
+.report-complete-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #18543a 0%, #2b8a61 100%);
+  animation: reportFillGrow 0.65s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.report-section-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.report-section-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: #ffffff;
+  border: 1px solid #c6dcd0;
+  color: #184d36;
+}
+
+/* Embedded metric comparison bars inside Advisor & Quant reports */
+.metric-mini-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 108px;
+}
+
+.metric-mini-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #e7ece7;
+  overflow: hidden;
+}
+
+.metric-mini-fill {
+  height: 100%;
+  border-radius: 999px;
+  animation: reportFillGrow 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.metric-mini-fill.good {
+  background: linear-gradient(90deg, #1f6a4a, #37996d);
+}
+
+.metric-mini-fill.warn {
+  background: linear-gradient(90deg, #b84a32, #d96b4f);
+}
+
+.metric-mini-fill.neutral {
+  background: linear-gradient(90deg, #4b6355, #6c8777);
+}
+
+.calc-visual-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 11px;
+  background: #ffffff;
+  border: 1px solid #dde3d8;
+}
+
+.calc-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.79rem;
+  color: #222a24;
+}
+
+.calc-bar-label-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes agentTopGlow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 200% 50%;
+  }
+}
+
+@keyframes agentOrbPulse {
+  0% {
+    transform: scale(0.94);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.24);
+    opacity: 0;
+  }
+}
+
+@keyframes agentBarShimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(180%);
+  }
+}
+
+@keyframes agentBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes agentPanelFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes reportSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes reportFillGrow {
+  from {
+    transform: scaleX(0);
+    transform-origin: left center;
+  }
+  to {
+    transform: scaleX(1);
+    transform-origin: left center;
+  }
+}
+
+@media (max-width: 920px) {
+  .agent-stages-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .agent-stages-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-progress-card,
+  .agent-progress-card::before,
+  .agent-pulse-orb::after,
+  .agent-bar-fill,
+  .agent-bar-fill::after,
+  .agent-live-dot,
+  .agent-stream-cursor,
+  .report-reveal-panel,
+  .report-complete-fill,
+  .metric-mini-fill {
+    animation: none !important;
+    transition: none !important;
+  }
+}
