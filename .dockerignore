@@ -1,0 +1,36 @@
+# Version control & local virtualenvs
+.git
+.github
+.venv
+venv
+__pycache__
+*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.egg-info
+dist
+
+# Secrets & local environment files (never bake into images)
+.env
+.env.*
+*.pem
+*.key
+*credentials*.json
+*service-account*.json
+
+# Node / Next.js build caches
+node_modules
+apps/web/node_modules
+.next
+apps/web/.next
+out
+
+# Tests, Terraform state, and docs not needed in runtime images
+**/tests
+infra
+deploy/README.md
+deploy/RUNBOOK.md
+*.tfstate
+*.tfstate.*
+.terraform

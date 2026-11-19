@@ -1,0 +1,36 @@
+# Copy to `terraform.tfvars` (gitignored if containing environment specifics) and fill in confirmed values.
+# NEVER put secret values, API keys, or passwords in this file.
+
+project_id          = "<CONFIRMED_GCP_PROJECT_ID>"
+region              = "<CONFIRMED_GCP_REGION>"
+environment         = "prod"
+identity_project_id = null # Uses project_id when null
+
+github_repository = "leesangyeon1/harnessrouter-hackathon"
+deploy_git_refs   = ["refs/heads/main", "refs/heads/dev"]
+
+# Initial immutable image tag in Artifact Registry
+api_image = "<REGION>-docker.pkg.dev/<PROJECT_ID>/hr-finance-prod-containers/finance-api:<GIT_SHA>"
+
+# Flip to true once apps/web is merged and finance-web image is pushed
+deploy_web_service = false
+web_image          = ""
+
+# Explicit HTTPS frontend origin(s) for CORS (never '*')
+cors_allowed_origins = [
+  # "https://app.example.com"
+]
+
+# Sandbox / Paper locks (validated by Terraform)
+plaid_host            = "sandbox.plaid.com"
+alpaca_paper_base_url = "https://paper-api.alpaca.markets"
+
+# Cloud SQL HA & sizing (prod defaults to REGIONAL HA + automated backups + PITR)
+db_tier            = "db-custom-2-7680"
+db_max_connections = 200
+
+# Enable once market-ingest & paper-order schedules and modules are confirmed
+enable_scheduler_jobs  = false
+scheduler_timezone     = "America/New_York"
+schedule_market_ingest = ""
+schedule_paper_order   = ""
