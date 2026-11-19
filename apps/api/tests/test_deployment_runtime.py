@@ -329,6 +329,10 @@ def test_bootstrap_roles_creates_nobypassrls_login_member(migrator_url: str) -> 
     with psycopg.connect(migrator_url) as conn, conn.transaction():
         ensure_runtime_login_role(conn, login_name, login_pw, "finance_api")
 
+    # Second run as non-superuser CREATEROLE migrator must also succeed idempotently (PG16).
+    with psycopg.connect(migrator_url) as conn, conn.transaction():
+        ensure_runtime_login_role(conn, login_name, login_pw, "finance_api")
+
     boot_url = make_conninfo(migrator_url, user=login_name, password=login_pw, dbname=dbname)
     with psycopg.connect(boot_url) as boot_conn:
         assert verify_runtime_role(boot_conn, required_role="finance_api") is None

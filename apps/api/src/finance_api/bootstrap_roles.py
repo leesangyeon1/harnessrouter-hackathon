@@ -35,16 +35,19 @@ def ensure_runtime_login_role(
             ).format(sql.Identifier(login_name), sql.Literal(password))
         )
     else:
+        # Non-superuser CREATEROLE roles in PostgreSQL 16 cannot specify [NO]SUPERUSER
+        # or [NO]BYPASSRLS in ALTER ROLE; verify they remain false instead.
         conn.execute(
-            sql.SQL(
-                "ALTER ROLE {} WITH LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS"
-                " NOCREATEROLE NOCREATEDB"
-            ).format(sql.Identifier(login_name), sql.Literal(password))
+            sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {} NOCREATEROLE NOCREATEDB").format(
+                sql.Identifier(login_name), sql.Literal(password)
+            )
         )
-    # Explicitly revoke cloudsqlsuperuser if ever attached out-of-band.
-    has_csql = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = 'cloudsqlsuperuser'").fetchone()
-    if has_csql is not None:
-        conn.execute(sql.SQL("REVOKE cloudsqlsuperuser FROM {}").format(sql.Identifier(login_name)))
+    flags = conn.execute(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = %s",
+        (login_name,),
+    ).fetchone()
+    if flags != (False, False):
+        raise RuntimeError(f"runtime login role {login_name} has unsafe privilege flags {flags}")
     conn.execute(
         sql.SQL("GRANT {} TO {}").format(sql.Identifier(group_role), sql.Identifier(login_name))
     )
