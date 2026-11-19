@@ -3,6 +3,9 @@ export default defineConfig({
   testDir: "./tests",
   testMatch: "**/*.spec.ts",
   fullyParallel: false,
+  // The local transport fixture shares role, product-readiness and history state.
+  // Different files must not reset that state during another test's readback.
+  workers: 1,
   use: {
     baseURL: "http://127.0.0.1:3100",
     viewport: { width: 1440, height: 1000 },
