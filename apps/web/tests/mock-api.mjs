@@ -2,6 +2,99 @@
 import http from "node:http";
 let role = "admin";
 let scenario = "report";
+let cycleScenario = "ready";
+// Synthetic local screen; no live market/provider data is used here.
+const stockCoverage = {
+  provider_listed: 23,
+  not_active: 2,
+  not_tradable: 1,
+  not_fractionable: 2,
+  not_on_list: 5,
+  not_usd: 0,
+  too_few_bars: 1,
+  missing_screen_date: 0,
+  eligible: 13,
+  liquidity_ranked: 5,
+  selected: 3,
+};
+const cycle = {
+  cycle_date: "2026-11-18",
+  model_set_version: "daily-v1",
+  policy_version: 1,
+  sectors: {
+    stock: {
+      universe: "alpaca_us_equity",
+      feed: "iex",
+      coverage: stockCoverage,
+      excluded: { EEE: "too_few_bars" },
+      selections: [
+        {
+          symbol: "AAA",
+          mean_dollar_volume: "900000000.0",
+          mean_abs_move: "0.06005404864377939",
+        },
+        {
+          symbol: "BBB",
+          mean_dollar_volume: "800000000.0",
+          mean_abs_move: "0.05",
+        },
+        {
+          symbol: "CCC",
+          mean_dollar_volume: "700000000.0",
+          mean_abs_move: "0.04",
+        },
+      ],
+    },
+    bond: {
+      universe: "bond_etf_list@1",
+      feed: "iex",
+      coverage: {
+        ...stockCoverage,
+        provider_listed: 7,
+        not_active: 1,
+        not_tradable: 0,
+        not_fractionable: 1,
+        not_on_list: 0,
+        eligible: 5,
+        liquidity_ranked: 2,
+        too_few_bars: 2,
+        selected: 0,
+      },
+      excluded: {
+        BND: "not_fractionable",
+        TIP: "not_active",
+        TLT: "too_few_bars",
+        IEF: "too_few_bars",
+      },
+      selections: [],
+    },
+    crypto: {
+      universe: "alpaca_crypto_usd",
+      feed: "alpaca_venue",
+      coverage: {
+        ...stockCoverage,
+        provider_listed: 4,
+        not_active: 0,
+        not_tradable: 1,
+        not_fractionable: 0,
+        not_on_list: 0,
+        not_usd: 1,
+        too_few_bars: 0,
+        eligible: 2,
+        liquidity_ranked: 1,
+        selected: 1,
+      },
+      excluded: {},
+      selections: [
+        {
+          symbol: "BTC/USD",
+          mean_dollar_volume: "1500000.125",
+          mean_abs_move: "0.0125",
+        },
+      ],
+    },
+  },
+};
 let seeded = false;
 let tokens = [];
 const report = {
@@ -38,11 +131,13 @@ const server = http.createServer(async (req, res) => {
     if (path.endsWith("reset")) {
       role = "admin";
       scenario = data.scenario ?? "report";
+      cycleScenario = data.cycleScenario ?? "ready";
       tokens = [];
       seeded = false;
     }
     if (path.endsWith("role")) role = data.role;
     if (path.endsWith("scenario")) scenario = data.scenario;
+    if (path.endsWith("cycle")) cycleScenario = data.scenario;
     send({ status: "ok" });
     return;
   }
@@ -100,6 +195,27 @@ const server = http.createServer(async (req, res) => {
   }
   if (path === "/v1/plaid/sync") {
     send({ accounts: 4, transactions: 12, liabilities: 2, holdings: 1 });
+    return;
+  }
+  if (path === "/v1/cycles/latest") {
+    if (cycleScenario === "slow")
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    if (cycleScenario === "missing") {
+      send({ detail: "no cycle" }, 404);
+      return;
+    }
+    if (cycleScenario === "error") {
+      send({ detail: "synthetic provider failure" }, 502);
+      return;
+    }
+    if (cycleScenario === "partial") {
+      send({
+        ...cycle,
+        sectors: { stock: cycle.sectors.stock, bond: cycle.sectors.bond },
+      });
+      return;
+    }
+    send(cycle);
     return;
   }
   if (path === "/v1/reports/spending") {

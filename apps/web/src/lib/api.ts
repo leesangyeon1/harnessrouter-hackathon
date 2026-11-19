@@ -1,3 +1,4 @@
+import { parseCycle, type LatestCycle } from "./cycles";
 export type SpendingLine = { month: string; category: string; amount: string };
 export type SpendingReport = {
   id: string;
@@ -201,6 +202,22 @@ export class FinanceApi {
   }
   async computeSpending(): Promise<SpendingReport> {
     return parseReport(await this.request("/v1/reports/spending", "POST"));
+  }
+  async latestCycle(): Promise<LatestCycle | null> {
+    try {
+      const data = await this.request("/v1/cycles/latest");
+      try {
+        return parseCycle(data);
+      } catch {
+        throw new ApiError(
+          502,
+          "The published cycle response could not be read. Please try again.",
+        );
+      }
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
+    }
   }
 }
 

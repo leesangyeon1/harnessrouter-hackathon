@@ -83,14 +83,27 @@ async function mockIdentity(
     },
   );
 }
-async function loginCustomer(page: Page) {
+async function loginCustomer(
+  page: Page,
+  entry: "connect" | "discovery" = "connect",
+) {
   await mockIdentity(page);
   await page.goto("/");
-  await page
-    .getByRole("button", { name: "Connect account", exact: true })
-    .first()
-    .click();
-  await page.getByRole("button", { name: "Sign in and connect" }).click();
+  if (entry === "discovery") {
+    await page
+      .locator(".sidebar")
+      .getByRole("button", { name: "Market discovery", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Sign in for latest cycle", exact: true })
+      .click();
+  } else {
+    await page
+      .getByRole("button", { name: "Connect account", exact: true })
+      .first()
+      .click();
+    await page.getByRole("button", { name: "Sign in and connect" }).click();
+  }
   await page.getByLabel("Email address").fill("customer@example.com");
   await page.getByLabel("Password", { exact: true }).fill("synthetic-password");
   await page
@@ -99,6 +112,150 @@ async function loginCustomer(page: Page) {
     .click();
   await expect(page.locator(".workspace-badge")).toHaveText("Sandbox");
 }
+
+test("published discovery preserves sector scope, coverage, precision and empty versus missing data", async ({
+  page,
+}) => {
+  await page.request.post(`${api}/__test__/reset`, { data: {} });
+  const plaidCalls: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/v1/plaid/")) plaidCalls.push(request.url());
+  });
+  await loginCustomer(page, "discovery");
+  await page
+    .locator(".sidebar")
+    .getByRole("button", { name: "Market discovery", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Cycle 2026-11-18", exact: true }),
+  ).toBeVisible();
+  const stock = page.getByRole("region", {
+    name: "Stocks cycle screen",
+    exact: true,
+  });
+  await expect(
+    stock.getByText("alpaca_us_equity", { exact: true }),
+  ).toBeVisible();
+  await expect(stock.getByText("iex", { exact: true })).toBeVisible();
+  await expect(stock.getByText("23", { exact: true })).toBeVisible();
+  await expect(stock.getByText("900000000.0", { exact: true })).toBeVisible();
+  await expect(
+    stock.getByText("0.06005404864377939", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("daily-v1", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("columnheader", { name: "Stable winner", exact: true }),
+  ).toHaveCount(0);
+  await stock.getByText("Named exclusions (1)", { exact: true }).click();
+  await expect(stock.getByText("EEE", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText(
+      "These qualified screens do not represent the whole market.",
+      { exact: false },
+    ),
+  ).toBeVisible();
+  if (await page.locator(".toast").isVisible())
+    await page
+      .getByRole("button", { name: "Dismiss notification", exact: true })
+      .click();
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await page.screenshot({ path: "evidence/cycle-desktop.png", fullPage: true });
+  await page.getByRole("button", { name: "Crypto", exact: true }).click();
+  await expect(page.getByText("alpaca_venue", { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect
+    .poll(() =>
+      page
+        .locator(".sidebar")
+        .evaluate((node) => node.getBoundingClientRect().right),
+    )
+    .toBeLessThanOrEqual(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+  ).toBe(false);
+  await page.screenshot({ path: "evidence/cycle-mobile.png", fullPage: true });
+  const a11y = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(
+    a11y.violations.map((v) => ({
+      id: v.id,
+      targets: v.nodes.map((n) => n.target),
+    })),
+  ).toEqual([]);
+  await page.getByRole("button", { name: "Bond ETFs", exact: true }).click();
+  await expect(
+    page.getByText("No selections for this sector.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("bond_etf_list@1", { exact: true }),
+  ).toBeVisible();
+  await page.request.post(`${api}/__test__/cycle`, {
+    data: { scenario: "partial" },
+  });
+  await page
+    .getByRole("button", { name: "Refresh cycle", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Crypto", exact: true }).click();
+  await expect(
+    page.getByText("Data not supplied", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Unavailable", { exact: true })).toHaveCount(2);
+  expect(plaidCalls).toEqual([]);
+  await page.screenshot({ path: "evidence/cycle-partial.png", fullPage: true });
+});
+
+test("discovery handles 404, provider failure, loading and retry without a preview fallback", async ({
+  page,
+}) => {
+  await page.request.post(`${api}/__test__/reset`, {
+    data: { cycleScenario: "missing" },
+  });
+  await loginCustomer(page);
+  await page
+    .locator(".sidebar")
+    .getByRole("button", { name: "Market discovery", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "No published cycle yet", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("AAPL", { exact: true })).toHaveCount(0);
+  await page.request.post(`${api}/__test__/cycle`, {
+    data: { scenario: "error" },
+  });
+  await page
+    .getByRole("button", { name: "Refresh cycle", exact: true })
+    .click();
+  await expect(page.locator(".cycle-discovery .error-banner")).toContainText(
+    "provider is temporarily unavailable",
+  );
+  await page.screenshot({ path: "evidence/cycle-error.png", fullPage: true });
+  await page.request.post(`${api}/__test__/cycle`, {
+    data: { scenario: "slow" },
+  });
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
+  await expect(
+    page.getByText("Loading the latest published cycle…", { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: "evidence/cycle-loading.png", fullPage: true });
+  await expect(
+    page.getByRole("heading", { name: "Cycle 2026-11-18", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".cycle-discovery .error-banner")).toHaveCount(0);
+  await page.request.post(`${api}/__test__/cycle`, {
+    data: { scenario: "error" },
+  });
+  await page
+    .getByRole("button", { name: "Refresh cycle", exact: true })
+    .click();
+  await expect(page.locator(".cycle-discovery .error-banner")).toContainText(
+    "last retrieved screen remains",
+  );
+  await expect(page.getByText("AAA", { exact: true })).toBeVisible();
+});
 
 test("customer handles empty report, seed/sync/compute, partial data and sign out", async ({
   page,

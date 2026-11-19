@@ -405,6 +405,9 @@ button svg {
   border-radius: 5px;
   padding: 4px 7px;
 }
+.workspace-badge:not(.demo) {
+  color: #526e58;
+}
 .workspace-badge.demo {
   color: #a07844;
   background: #fbf6eb;

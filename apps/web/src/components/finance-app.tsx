@@ -72,6 +72,7 @@ import {
   transactions,
 } from "@/lib/demo";
 import { authConfigured, identityAuth } from "@/lib/firebase";
+import { CycleDiscovery } from "./cycle-discovery";
 
 type View =
   | "overview"
@@ -368,6 +369,10 @@ export function FinanceApp() {
       }
     },
     [client],
+  );
+  const loadCycle = useCallback(
+    async () => (user ? client(user).latestCycle() : null),
+    [client, user],
   );
 
   useEffect(() => {
@@ -748,22 +753,41 @@ export function FinanceApp() {
               </p>
             </div>
             <div className="heading-actions">
-              {view === "spending" ? (
-                <button
-                  className="button secondary"
-                  onClick={exportReport}
-                  disabled={!visibleReport}
-                >
-                  <ArrowDownToLine size={16} />
-                  Export report
-                </button>
+              {view === "discovery" ? (
+                demo ? (
+                  <button
+                    className="button primary"
+                    onClick={() => setDialog("auth")}
+                  >
+                    Sign in for latest cycle
+                    <ArrowRight size={15} />
+                  </button>
+                ) : (
+                  <span className="pill neutral-pill">Read-only screen</span>
+                )
               ) : (
-                <button className="date-button" onClick={() => go("spending")}>
-                  {monthName(month)}
-                  <ChevronDown size={15} />
-                </button>
+                <>
+                  {view === "spending" ? (
+                    <button
+                      className="button secondary"
+                      onClick={exportReport}
+                      disabled={!visibleReport}
+                    >
+                      <ArrowDownToLine size={16} />
+                      Export report
+                    </button>
+                  ) : (
+                    <button
+                      className="date-button"
+                      onClick={() => go("spending")}
+                    >
+                      {monthName(month)}
+                      <ChevronDown size={15} />
+                    </button>
+                  )}
+                  {action}
+                </>
               )}
-              {action}
             </div>
           </div>
           {demo && (
@@ -1644,9 +1668,7 @@ export function FinanceApp() {
                   ))}
                 </div>
                 <span className="muted small">
-                  {demo
-                    ? "Sample cycle · Nov 17, 2026"
-                    : "No published cycle yet"}
+                  {demo ? "Sample cycle · Nov 17, 2026" : "Latest stored cycle"}
                 </span>
               </div>
               {demo ? (
@@ -1728,13 +1750,11 @@ export function FinanceApp() {
                   </div>
                 </section>
               ) : (
-                <section className="panel">
-                  <Empty
-                    icon={Compass}
-                    title="The next view is taking shape"
-                    text="A published market cycle will bring its scope, selections, and model results here. Your service doesn’t expose one yet."
-                  />
-                </section>
+                <CycleDiscovery
+                  key={user?.uid}
+                  load={loadCycle}
+                  sector={sector}
+                />
               )}
               <div className="scope-grid">
                 {[
@@ -1759,8 +1779,10 @@ export function FinanceApp() {
               </div>
               <p className="scope-note">
                 <CircleHelp size={14} />
-                These qualified screens do not represent the whole market.
-                Sample model names are illustrative, not backtest outputs.
+                These qualified screens do not represent the whole market.{" "}
+                {demo
+                  ? "Sample model names are illustrative, not backtest outputs."
+                  : "Published selections are screening results, not model-performance winners."}
               </p>
             </>
           )}

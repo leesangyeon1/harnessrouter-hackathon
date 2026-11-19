@@ -90,6 +90,31 @@
       "viewport": "390x844",
       "artifact": "admin-denied.png",
       "observation": "Role removal yields a server-generated denied page and HTTP 403, rather than rendering operations data."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "cycle-desktop.png",
+      "observation": "Signed-in synthetic cycle shows stored versions and all three sectors with fixture universes, feeds, coverage and exclusions; exact decimal strings are retained and zero selections remain visible. Capture starts at scroll top after interaction."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "cycle-mobile.png",
+      "observation": "Crypto-filtered published screen fits the mobile page after the drawer resize transition settles. Coverage stacks in two columns and exact figures scroll inside a labelled region. Live mobile axe checks pass."
+    },
+    {
+      "viewport": "390x844",
+      "artifact": "cycle-partial.png",
+      "observation": "An omitted crypto sector displays data not supplied with unavailable universe/feed, distinct from the published bond sector with zero selections."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "cycle-error.png",
+      "observation": "A synthetic latest-cycle 502 displays a scoped retry action without rendering sample selections. A later failed refresh retains known published data with an explicit last-retrieved notice."
+    },
+    {
+      "viewport": "1440x1000",
+      "artifact": "cycle-loading.png",
+      "observation": "A delayed synthetic latest-cycle response displays a loading status and then resolves to the stored screen. The API test also distinguishes 404 from authorization/provider errors."
     }
   ]
 }

@@ -2,6 +2,8 @@
 
 The customer and operations apps are **separate builds and separate services/origins**. They share the existing FastAPI backend. Cloud/environment provisioning belongs to the owner's Antigravity environment workflow; these files prepare the code and configuration, without asserting that services have been deployed. The older root `deploy/README.md` and unified web Terraform/Docker arrangement predate this split; the environment owner must wire a second operations service and its origin rather than putting operations routes into the customer service.
 
+The repository's current `deploy` workflow runs on pushes to both `dev` and `main`. With its environment variables configured, it can apply Terraform, run migrations and redeploy services; a `dev` push is therefore also a deployment trigger. Pull requests run its verification/build stage without the cloud apply stages. This behavior belongs to the shared environment workflow, not to the frontend app code. Separate operations-service deployment is still an environment integration requirement.
+
 ## Configuration
 
 Values in `.env.example` are placeholders, not credentials. Never commit `.env.local` or paste secrets into room messages. All `NEXT_PUBLIC_*` variables are embedded in JavaScript **at build time** and visible to users. An environment-variable change on an already built Cloud Run revision does not replace them; rebuild the image.
@@ -28,6 +30,8 @@ Backend runtime configuration stays on the API/worker services: database URLs, s
 Set the API's `CORS_ALLOWED_ORIGINS` to the exact customer origin (and approved local development origins), for example `https://customer.example.com`. The customer sends `Authorization` and `Content-Type` headers; retain the existing backend CORS methods/headers and exposed `X-Request-ID`. Operations uses server-to-server fetches, so its backend traffic does not require browser CORS. Its own mutations require `Origin` to equal `ADMIN_APP_ORIGIN`. TLS must terminate correctly at the hosting platform. Do not configure authenticated API redirects: both clients refuse them.
 
 Operations stores the ID token in a host-scoped, HttpOnly, Secure-in-production, SameSite=Strict cookie. Every protected page and API verifies the current backend admin role, with no cached permission result. Before each credential read or mutation, the browser asks Firebase for the current ID token and renews the server cookie when a browser identity exists. Expiration alone does not trigger `onIdTokenChanged`, so operations does not rely on that observer for renewal. A failed renewal blocks the operation; mutations are never automatically replayed. An expired session on a full page reload returns to sign-in. Expired identity tokens fail closed. Refresh-token revocation does not immediately invalidate an already-issued ID token under the current backend verifier; immediate operations access removal uses the database admin role. No refresh token or worker credential is stored by the server; issued worker secrets are shown once and forgotten on dismissal. Do not add response caching for authenticated pages or `/api/*`.
+
+Market Discovery's `GET /v1/cycles/latest` uses the same public API origin and fresh bearer token. It introduces no new frontend variables and requires sign-in, not a bank connection. A 404 means no cycle has been published. Provider credentials and market-ingest jobs stay on backend services.
 
 ## Container builds
 
