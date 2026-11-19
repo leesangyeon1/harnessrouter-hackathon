@@ -29,3 +29,31 @@ jobs:
       - run: make lint
       - run: make type
       - run: make test
+
+  # The two web apps. The browser tests live in apps/web and start both apps, so one job
+  # installs both.
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/admin/package-lock.json
+      - run: npm ci
+        working-directory: apps/web
+      - run: npm ci
+        working-directory: apps/admin
+      - run: npm run check
+        working-directory: apps/web
+      - run: npm run check
+        working-directory: apps/admin
+      - run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - run: npx playwright test
+        working-directory: apps/web
+        env:
+          PLAYWRIGHT_USE_BUNDLED: "1"
