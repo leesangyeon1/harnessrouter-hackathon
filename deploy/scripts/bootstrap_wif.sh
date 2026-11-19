@@ -11,9 +11,12 @@
 
 set -euo pipefail
 
-: "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID}"
-: "${GCP_REGION:?Set GCP_REGION}"
-: "${TF_STATE_BUCKET:?Set TF_STATE_BUCKET}"
+GCP_PROJECT_ID="${1:-${GCP_PROJECT_ID:-}}"
+GCP_REGION="${2:-${GCP_REGION:-}}"
+TF_STATE_BUCKET="${3:-${TF_STATE_BUCKET:-}}"
+: "${GCP_PROJECT_ID:?Set GCP_PROJECT_ID or pass as arg 1}"
+: "${GCP_REGION:?Set GCP_REGION or pass as arg 2}"
+: "${TF_STATE_BUCKET:?Set TF_STATE_BUCKET or pass as arg 3}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-leesangyeon1/harnessrouter-hackathon}"
 DEPLOY_BRANCHES_CSV="${DEPLOY_BRANCHES_CSV:-refs/heads/main,refs/heads/dev}"
 
@@ -26,6 +29,7 @@ echo "==> Enabling bootstrap APIs on project ${GCP_PROJECT_ID}..."
 gcloud services enable \
   iam.googleapis.com \
   iamcredentials.googleapis.com \
+  identitytoolkit.googleapis.com \
   sts.googleapis.com \
   cloudresourcemanager.googleapis.com \
   storage.googleapis.com \
@@ -59,6 +63,7 @@ if ! gcloud iam service-accounts describe "${CICD_SA_EMAIL}" --project="${GCP_PR
 fi
 
 for role in \
+  roles/viewer \
   roles/artifactregistry.admin \
   roles/run.admin \
   roles/cloudsql.admin \
@@ -126,11 +131,17 @@ else
     --attribute-condition="${CEL_CONDITION}"
 fi
 
-gcloud iam service-accounts add-iam-policy-binding "${CICD_SA_EMAIL}" \
-  --project="${GCP_PROJECT_ID}" \
-  --role="roles/iam.workloadIdentityUser" \
-  --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPOSITORY}" \
-  --quiet >/dev/null
+for attempt in 1 2 3 4; do
+  if gcloud iam service-accounts add-iam-policy-binding "${CICD_SA_EMAIL}" \
+    --project="${GCP_PROJECT_ID}" \
+    --role="roles/iam.workloadIdentityUser" \
+    --member="principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/attribute.repository/${GITHUB_REPOSITORY}" \
+    --quiet >/dev/null; then
+    break
+  fi
+  echo "Waiting for IAM propagation (attempt ${attempt}/4)..."
+  sleep 5
+done
 
 WIF_PROVIDER="projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}/providers/${PROVIDER_ID}"
 

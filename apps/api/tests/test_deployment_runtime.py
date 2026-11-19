@@ -22,7 +22,8 @@ from psycopg.conninfo import make_conninfo
 
 from finance_api.app import create_app
 from finance_api.auth import IdTokenVerifier
-from finance_api.db import create_pool, tenant_transaction
+from finance_api.bootstrap_roles import ensure_runtime_login_role
+from finance_api.db import create_pool, tenant_transaction, verify_runtime_role
 from finance_api.internal_auth import ServiceOidcVerifier
 from finance_api.jobs import run_job, validate_sandbox_and_paper_env
 from finance_api.observability import (
@@ -318,6 +319,19 @@ def test_jobs_refuse_live_alpaca_host_and_unsafe_db_roles(
 
     run_job("market-ingest", cycle_url, entrypoint_override=mark_ran)
     assert ran == [True]
+
+
+def test_bootstrap_roles_creates_nobypassrls_login_member(migrator_url: str) -> None:
+    dbname = psycopg.conninfo.conninfo_to_dict(migrator_url)["dbname"]
+    login_name = f"boot_api_{secrets.token_hex(4)}"
+    login_pw = secrets.token_urlsafe(16)
+
+    with psycopg.connect(migrator_url) as conn, conn.transaction():
+        ensure_runtime_login_role(conn, login_name, login_pw, "finance_api")
+
+    boot_url = make_conninfo(migrator_url, user=login_name, password=login_pw, dbname=dbname)
+    with psycopg.connect(boot_url) as boot_conn:
+        assert verify_runtime_role(boot_conn, required_role="finance_api") is None
 
 
 def test_structured_logging_records_correlation_ids_and_redacts_secrets() -> None:

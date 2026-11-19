@@ -28,7 +28,7 @@ resource "google_cloud_run_v2_job" "db_migrate" {
 
       containers {
         image   = var.api_image
-        command = ["python", "-m", "finance_api.migrate"]
+        command = ["python", "-m", "finance_api.bootstrap_roles"]
 
         resources {
           limits = {
@@ -47,6 +47,33 @@ resource "google_cloud_run_v2_job" "db_migrate" {
           value_source {
             secret_key_ref {
               secret  = google_secret_manager_secret.managed["db_url_migrator"].secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "BOOTSTRAP_API_DB_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed["db_url_api"].secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "BOOTSTRAP_CYCLE_DB_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed["db_url_cycle"].secret_id
+              version = "latest"
+            }
+          }
+        }
+        env {
+          name = "BOOTSTRAP_EXECUTOR_DB_URL"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.managed["db_url_executor"].secret_id
               version = "latest"
             }
           }

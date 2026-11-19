@@ -13,15 +13,22 @@ locals {
       accessors = [
         google_service_account.api.email,
         google_service_account.worker.email,
+        google_service_account.migrator.email,
       ]
     }
     db_url_cycle = {
-      id        = "${local.prefix}-db-url-cycle"
-      accessors = [google_service_account.cycle_job.email]
+      id = "${local.prefix}-db-url-cycle"
+      accessors = [
+        google_service_account.cycle_job.email,
+        google_service_account.migrator.email,
+      ]
     }
     db_url_executor = {
-      id        = "${local.prefix}-db-url-executor"
-      accessors = [google_service_account.executor_job.email]
+      id = "${local.prefix}-db-url-executor"
+      accessors = [
+        google_service_account.executor_job.email,
+        google_service_account.migrator.email,
+      ]
     }
     secret_box_key = {
       id = "${local.prefix}-secret-box-key"

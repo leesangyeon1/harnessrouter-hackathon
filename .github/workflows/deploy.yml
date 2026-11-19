@@ -15,7 +15,7 @@ on:
       action:
         description: "Deployment action"
         required: true
-        default: "deploy"
+        default: "apply-and-deploy"
         type: choice
         options:
           - plan
@@ -47,7 +47,7 @@ concurrency:
 jobs:
   verify:
     name: Gate, Terraform Validate & Image Build Check
-    if: ${{ (inputs.action || 'deploy') != 'rollback' }}
+    if: ${{ (inputs.action || 'apply-and-deploy') != 'rollback' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -93,7 +93,7 @@ jobs:
         run: |
           ./deploy/scripts/verify_bundle_secrets.sh --repo apps/api/src packages infra deploy/docker
           docker build -f apps/api/Dockerfile -t finance-api:${GITHUB_SHA} .
-          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.task_worker, finance_api.migrate, finance_api.jobs"
+          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.task_worker, finance_api.migrate, finance_api.bootstrap_roles, finance_api.jobs"
 
       - name: Build production Web container & scan static bundle (when apps/web exists)
         if: hashFiles('apps/web/package.json') != ''
@@ -108,7 +108,7 @@ jobs:
     needs: verify
     if: >-
       github.event_name != 'pull_request' &&
-      (inputs.action || 'deploy') != 'rollback' &&
+      (inputs.action || 'apply-and-deploy') != 'rollback' &&
       vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
       vars.TF_STATE_BUCKET != ''
     runs-on: ubuntu-latest
@@ -160,7 +160,7 @@ jobs:
       needs.verify.result == 'success' &&
       (needs.terraform-plan.result == 'success' || needs.terraform-plan.result == 'skipped') &&
       github.event_name != 'pull_request' &&
-      (inputs.action == 'deploy' || inputs.action == 'apply-and-deploy' || github.event_name == 'push') &&
+      (inputs.action == '' || inputs.action == 'deploy' || inputs.action == 'apply-and-deploy') &&
       vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
@@ -187,12 +187,12 @@ jobs:
       - run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
       - uses: hashicorp/setup-terraform@v3
-        if: inputs.action == 'apply-and-deploy' && env.TF_STATE_BUCKET != ''
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
         with:
           terraform_version: "1.9.8"
 
-      - name: Ensure Artifact Registry exists via Terraform (when apply-and-deploy)
-        if: inputs.action == 'apply-and-deploy' && env.TF_STATE_BUCKET != ''
+      - name: Bootstrap foundational GCP resources (Registry, Cloud SQL, Secret containers)
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
         working-directory: infra/terraform
         run: |
           DB_TIER="${{ vars.DB_TIER || (github.ref_name == 'main' && 'db-custom-2-7680' || 'db-custom-1-3840') }}"
@@ -203,11 +203,20 @@ jobs:
           terraform apply -auto-approve \
             -target=google_project_service.required \
             -target=google_artifact_registry_repository.containers \
+            -target=google_secret_manager_secret.managed \
+            -target=google_sql_database_instance.postgres \
+            -target=google_sql_database.finance \
             -var="project_id=${GCP_PROJECT_ID}" \
             -var="region=${GCP_REGION}" \
             -var="environment=${ENV_NAME}" \
             -var="api_image=${REPO}/finance-api:${GITHUB_SHA}" \
             -var="db_tier=${DB_TIER}"
+
+      - name: Ensure initial Secret Manager versions exist
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
+        run: |
+          chmod +x ./deploy/scripts/ensure_initial_secrets.sh
+          ./deploy/scripts/ensure_initial_secrets.sh "${GCP_PROJECT_ID}" "${GCP_REGION}" "${ENV_NAME}" "${NAME_PREFIX}"
 
       - name: Build and push immutable API image
         id: build
@@ -230,8 +239,18 @@ jobs:
             echo "web_image=${WEB_IMG}" >> "${GITHUB_OUTPUT}"
           fi
 
-      - name: Apply full Terraform stack (when apply-and-deploy)
-        if: inputs.action == 'apply-and-deploy' && env.TF_STATE_BUCKET != ''
+      - name: Record current revisions prior to rollout
+        id: prev
+        run: |
+          API_SVC="${NAME_PREFIX}-${ENV_NAME}-api"
+          WORKER_SVC="${NAME_PREFIX}-${ENV_NAME}-worker"
+          PREV_API="$(gcloud run services describe "${API_SVC}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
+          PREV_WORKER="$(gcloud run services describe "${WORKER_SVC}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
+          echo "api_rev=${PREV_API}" >> "${GITHUB_OUTPUT}"
+          echo "worker_rev=${PREV_WORKER}" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply full Terraform stack (IAM, Cloud Tasks, Jobs, Services, Monitoring)
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
         working-directory: infra/terraform
         run: |
           DB_TIER="${{ vars.DB_TIER || (github.ref_name == 'main' && 'db-custom-2-7680' || 'db-custom-1-3840') }}"
@@ -242,7 +261,7 @@ jobs:
             -var="api_image=${{ steps.build.outputs.api_image }}" \
             -var="db_tier=${DB_TIER}"
 
-      - name: Update and execute DB migration job (aborts deploy on failure)
+      - name: Update and execute DB migration & runtime role bootstrap job (aborts deploy on failure)
         run: |
           MIGRATE_JOB="${NAME_PREFIX}-${ENV_NAME}-db-migrate"
           gcloud run jobs update "${MIGRATE_JOB}" \
@@ -255,17 +274,7 @@ jobs:
             --region="${GCP_REGION}" \
             --wait
 
-      - name: Record current revisions for rollback safety
-        id: prev
-        run: |
-          API_SVC="${NAME_PREFIX}-${ENV_NAME}-api"
-          WORKER_SVC="${NAME_PREFIX}-${ENV_NAME}-worker"
-          PREV_API="$(gcloud run services describe "${API_SVC}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' || true)"
-          PREV_WORKER="$(gcloud run services describe "${WORKER_SVC}" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' || true)"
-          echo "api_rev=${PREV_API}" >> "${GITHUB_OUTPUT}"
-          echo "worker_rev=${PREV_WORKER}" >> "${GITHUB_OUTPUT}"
-
-      - name: Deploy Cloud Run Jobs & Services
+      - name: Update Cloud Run Jobs & Services to new revision
         id: rollout
         run: |
           PREFIX="${NAME_PREFIX}-${ENV_NAME}"
@@ -306,7 +315,10 @@ jobs:
           API_URL="$(gcloud run services describe "${PREFIX}-api" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
           WORKER_URL="$(gcloud run services describe "${PREFIX}-worker" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
 
-          curl -fsS "${API_URL}/health/ready" | grep -q '"ready"'
+          echo "API URL: ${API_URL}"
+          echo "Worker URL: ${WORKER_URL}"
+
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "${API_URL}/health/ready" | grep -q '"ready"'
 
           API_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/me")"
           test "${API_UNAUTH}" = "401"
