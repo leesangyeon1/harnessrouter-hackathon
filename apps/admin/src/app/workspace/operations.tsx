@@ -302,16 +302,16 @@ export function Operations({
                   </span>
                   <h2>
                     {QUANT_BENCHMARK_SUMMARY.totalCases} multi-quant cases ·{" "}
-                    {QUANT_BENCHMARK_SUMMARY.profitCases} profit (
-                    {QUANT_BENCHMARK_SUMMARY.profitRatePct.toFixed(1)}%) /{" "}
                     {QUANT_BENCHMARK_SUMMARY.lossCases} loss (
-                    {QUANT_BENCHMARK_SUMMARY.lossRatePct.toFixed(1)}%)
+                    {QUANT_BENCHMARK_SUMMARY.lossRatePct.toFixed(1)}%) /{" "}
+                    {QUANT_BENCHMARK_SUMMARY.profitCases} winning (
+                    {QUANT_BENCHMARK_SUMMARY.profitRatePct.toFixed(1)}%)
                   </h2>
                   <p>
-                    {QUANT_BENCHMARK_SUMMARY.totalLegExecutions} total execution
-                    legs (22 distinct quant strategies &amp; 22 tickers per
-                    case) with UTC entry/exit timestamps, prices, fees, Sharpe,
-                    drawdown, and cent-reconciled P&amp;L.
+                    {QUANT_BENCHMARK_SUMMARY.totalLegExecutions} individual
+                    quant runs (22 distinct quants &amp; 22 tickers per case)
+                    with exact mathematical signal formulas, parameters, UTC
+                    timestamps, fees, Sharpe, drawdown, and per-quant P&amp;L.
                   </p>
                 </div>
                 <button
