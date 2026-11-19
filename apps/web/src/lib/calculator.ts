@@ -99,7 +99,8 @@ function simulateCardPayoffCents(
         payable: false,
         months: null,
         upfrontFeeUsd: fmtUsd(upfrontFeeCents),
-        totalInterestUsd: "Exceeds monthly payment (negative/stalled amortization)",
+        totalInterestUsd:
+          "Exceeds monthly payment (negative/stalled amortization)",
         totalCostUsd: "Unavailable",
       };
     }
@@ -279,15 +280,16 @@ export function computeRefinanceComparison(
   };
 }
 
-export const ADVISOR_PRESETS: {
-  id: string;
-  label: string;
-  prompt: string;
-}[] = [
+export type AdvisorScenario = { id: string; label: string } & (
+  | { kind: "card"; inputs: BalanceTransferScenario }
+  | { kind: "refinance"; inputs: RefinanceScenario }
+);
+export const ADVISOR_SCENARIOS: AdvisorScenario[] = [
   {
     id: "balance-transfer",
     label: "24.49% Card vs. 0% 15-mo Balance Transfer",
-    prompt: computeBalanceTransferComparison({
+    kind: "card",
+    inputs: {
       balanceUsd: 2387.65,
       currentAprPct: 24.49,
       monthlyPaymentUsd: 200,
@@ -296,12 +298,13 @@ export const ADVISOR_PRESETS: {
       promoMonths: 15,
       postPromoAprPct: 21.99,
       goal: "Minimize total interest and fees while keeping my monthly payment at $200.00/month.",
-    }).formattedPrompt,
+    },
   },
   {
     id: "refinance-term-tradeoff",
     label: "Loan Refinance: 60-mo Lower Payment vs. Total Cost",
-    prompt: computeRefinanceComparison({
+    kind: "refinance",
+    inputs: {
       principalUsd: 18500,
       currentAprPct: 6.8,
       remainingMonths: 36,
@@ -309,12 +312,13 @@ export const ADVISOR_PRESETS: {
       newTermMonths: 60,
       refiFeeUsd: 250,
       goal: "Understand whether lowering my monthly cash outflow by extending to 60 months actually saves or costs more in total interest and fees.",
-    }).formattedPrompt,
+    },
   },
   {
     id: "refinance-same-term",
     label: "Loan Refinance: 6.80% vs. 5.10% Same 48-mo Term",
-    prompt: computeRefinanceComparison({
+    kind: "refinance",
+    inputs: {
       principalUsd: 18500,
       currentAprPct: 6.8,
       remainingMonths: 48,
@@ -322,6 +326,17 @@ export const ADVISOR_PRESETS: {
       newTermMonths: 48,
       refiFeeUsd: 185,
       goal: "Lower both my monthly payment and my total lifetime cost without extending my payoff date.",
-    }).formattedPrompt,
+    },
   },
 ];
+
+export function computeAdvisorScenario(scenario: AdvisorScenario) {
+  return scenario.kind === "card"
+    ? computeBalanceTransferComparison(scenario.inputs)
+    : computeRefinanceComparison(scenario.inputs);
+}
+export const ADVISOR_PRESETS = ADVISOR_SCENARIOS.map((scenario) => ({
+  id: scenario.id,
+  label: scenario.label,
+  prompt: computeAdvisorScenario(scenario).formattedPrompt,
+}));

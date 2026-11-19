@@ -264,7 +264,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (path === "/v1/agent-tasks") {
-    send({ tasks: quantTasks });
+    const feature = new URL(req.url, "http://127.0.0.1:4319").searchParams.get(
+      "feature_key",
+    );
+    send({
+      tasks: feature
+        ? quantTasks.filter((task) => task.feature_key === feature)
+        : quantTasks,
+    });
     return;
   }
   if (path.startsWith("/v1/agent-tasks/")) {

@@ -26,6 +26,12 @@ import {
 } from "lucide-react";
 import type { AgentTask, FinanceApi } from "@/lib/api";
 import {
+  advisorContextPath,
+  advisorWebRequest,
+  validAdvisorSnapshot,
+  type AdvisorSnapshot,
+} from "@/lib/advisor-context";
+import {
   ADVISOR_PRESETS,
   computeBalanceTransferComparison,
   computeRefinanceComparison,
@@ -50,9 +56,7 @@ function detectAdvisorSectionPills(markdown: string): string[] {
     found.push("Tradeoffs & Recommendation");
   if (lower.includes("next step") || lower.includes("missing"))
     found.push("Next Steps");
-  return found.length > 0
-    ? found
-    : ["Verified Analysis", "Structured Report"];
+  return found.length > 0 ? found : ["Verified Analysis", "Structured Report"];
 }
 
 function isTerminal(status: AgentTask["status"]): boolean {
@@ -86,10 +90,7 @@ function isTableSeparator(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed.includes("|") && !trimmed.includes("-")) return false;
   const cells = parseTableCells(trimmed);
-  return (
-    cells.length > 0 &&
-    cells.every((cell) => /^:?-{2,}:?$/.test(cell))
-  );
+  return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell));
 }
 
 function renderAdvisorMarkdown(markdown: string): ReactNode {
@@ -250,6 +251,13 @@ export function FinanceAdvisor({
   const followUpFieldId = useId();
 
   const [promptInput, setPromptInput] = useState("");
+  const [useSampleContext, setUseSampleContext] = useState(true);
+  const [sampleId, setSampleId] = useState("balance-transfer");
+  const [sampleSnapshot, setSampleSnapshot] = useState<AdvisorSnapshot | null>(
+    null,
+  );
+  const [sampleError, setSampleError] = useState("");
+  const [sampleReload, setSampleReload] = useState(0);
   const [followUpInput, setFollowUpInput] = useState("");
   const [showCalculator, setShowCalculator] = useState(false);
   const [calcMode, setCalcMode] = useState<"card" | "refi">("card");
@@ -281,6 +289,42 @@ export function FinanceAdvisor({
   const [error, setError] = useState<string | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
 
+  useEffect(() => {
+    const abort = new AbortController();
+    void fetch(`${advisorContextPath(sampleId)}/snapshot.json`, {
+      cache: "no-store",
+      credentials: "omit",
+      redirect: "error",
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]),
+    })
+      .then(async (response) => {
+        if (!response.ok)
+          throw new Error(
+            "The sample webpage is unavailable. Retry before analyzing.",
+          );
+        const snapshot: unknown = await response.json();
+        if (!validAdvisorSnapshot(snapshot, sampleId))
+          throw new Error(
+            "The sample context changed or could not be read. Reload the page before analyzing.",
+          );
+        if (!abort.signal.aborted) {
+          setSampleSnapshot(snapshot);
+          setSampleError("");
+        }
+      })
+      .catch((caught) => {
+        if (!abort.signal.aborted) {
+          setSampleSnapshot(null);
+          setSampleError(
+            caught instanceof Error
+              ? caught.message
+              : "Sample context unavailable.",
+          );
+        }
+      });
+    return () => abort.abort();
+  }, [sampleId, sampleReload]);
+
   const cardCalcPreview = useMemo(
     () =>
       computeBalanceTransferComparison({
@@ -293,14 +337,7 @@ export function FinanceAdvisor({
         postPromoAprPct: Math.max(0, Number(postPromoApr) || 0),
         goal: "Minimize total repayment cost while keeping monthly payments predictable.",
       }),
-    [
-      cardBalance,
-      cardApr,
-      cardMonthly,
-      transferFee,
-      promoMonths,
-      postPromoApr,
-    ],
+    [cardBalance, cardApr, cardMonthly, transferFee, promoMonths, postPromoApr],
   );
 
   const refiCalcPreview = useMemo(
@@ -412,10 +449,15 @@ export function FinanceAdvisor({
     }
     const trimmed = promptInput.trim();
     if (!trimmed) return;
+    if (useSampleContext && !sampleSnapshot) return;
     setSubmitting(true);
     setError(null);
     try {
-      const created = await api.startAgentTask(trimmed, {
+      const request =
+        useSampleContext && sampleSnapshot
+          ? advisorWebRequest(trimmed, sampleSnapshot, window.location.origin)
+          : trimmed;
+      const created = await api.startAgentTask(request, {
         featureKey: "advisor",
       });
       setPromptInput("");
@@ -486,7 +528,9 @@ export function FinanceAdvisor({
             <span className="eyebrow">
               PERSONAL FINANCE ADVISOR · VERIFIED SCENARIO COMPARISON
             </span>
-            <h2>Compare credit cards, debt payoff, and refinancing tradeoffs</h2>
+            <h2>
+              Compare credit cards, debt payoff, and refinancing tradeoffs
+            </h2>
             <p className="small muted">
               Analyze normalized balances, APRs, fees, and verified calculator
               outputs—distinguishing lower monthly payments from lower total
@@ -643,7 +687,9 @@ export function FinanceAdvisor({
                 <div className="advisor-calc-summary">
                   <span>
                     Verified preview: Current total{" "}
-                    <strong>{cardCalcPreview.optionCurrent.totalCostUsd}</strong>{" "}
+                    <strong>
+                      {cardCalcPreview.optionCurrent.totalCostUsd}
+                    </strong>{" "}
                     vs. Transfer total{" "}
                     <strong>
                       {cardCalcPreview.optionTransfer.totalCostUsd}
@@ -658,6 +704,7 @@ export function FinanceAdvisor({
                     type="button"
                     className="button secondary"
                     onClick={() => {
+                      setUseSampleContext(false);
                       setPromptInput(cardCalcPreview.formattedPrompt);
                       setShowCalculator(false);
                     }}
@@ -796,6 +843,7 @@ export function FinanceAdvisor({
                     type="button"
                     className="button secondary"
                     onClick={() => {
+                      setUseSampleContext(false);
                       setPromptInput(refiCalcPreview.formattedPrompt);
                       setShowCalculator(false);
                     }}
@@ -808,6 +856,110 @@ export function FinanceAdvisor({
           </div>
         )}
 
+        <section
+          className="advisor-context-card"
+          aria-label="Webpage data for new analyses"
+        >
+          <label className="advisor-context-toggle">
+            <input
+              type="checkbox"
+              checked={useSampleContext}
+              onChange={(event) => setUseSampleContext(event.target.checked)}
+            />
+            Use sample webpage data in new analyses
+          </label>
+          {useSampleContext ? (
+            <>
+              <label htmlFor={`${promptFieldId}-scenario`}>
+                Synthetic comparison scenario
+              </label>
+              <select
+                id={`${promptFieldId}-scenario`}
+                value={sampleId}
+                disabled={submitting}
+                onChange={(event) => {
+                  setSampleSnapshot(null);
+                  setSampleError("");
+                  setSampleId(event.target.value);
+                }}
+              >
+                {ADVISOR_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+              <p className="small muted">
+                Only the selected synthetic scenario, its goal/options and
+                deterministic calculator evidence are included. These are
+                demonstration figures, not your account data or real offers. The
+                agent must read the linked page; webpage access is not verified
+                merely by sending this request.
+              </p>
+              {sampleSnapshot && (
+                <>
+                  <p className="small">
+                    <strong>{sampleSnapshot.payload.scenario_version}</strong> ·{" "}
+                    {sampleSnapshot.payload.scenario_id} ·{" "}
+                    {sampleSnapshot.payload.calculator_evidence.version}
+                  </p>
+                  <p className="small">
+                    Goal: {sampleSnapshot.payload.comparison.goal}
+                  </p>
+                  <a
+                    href={`${advisorContextPath(sampleId)}?sha=${sampleSnapshot.sha256}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    View the exact sample webpage and calculator results
+                  </a>
+                  <details>
+                    <summary>Snapshot identity and figures</summary>
+                    <p className="small advisor-context-hash">
+                      SHA-256: {sampleSnapshot.sha256}
+                    </p>
+                    <pre>
+                      {JSON.stringify(
+                        sampleSnapshot.payload.comparison,
+                        null,
+                        2,
+                      )}
+                      {"\n"}
+                      {JSON.stringify(
+                        sampleSnapshot.payload.calculator_evidence,
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  </details>
+                </>
+              )}
+              {!sampleSnapshot && !sampleError && (
+                <p role="status">Loading sample webpage context…</p>
+              )}
+              {sampleError && (
+                <p role="alert">
+                  {sampleError}{" "}
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => {
+                      setSampleError("");
+                      setSampleReload((value) => value + 1);
+                    }}
+                  >
+                    Retry sample context
+                  </button>
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="small muted">
+              Custom comparison: only the inputs and verified calculator results
+              you provide will be sent. No sample webpage context is attached.
+            </p>
+          )}
+        </section>
         <form className="advisor-form" onSubmit={(e) => void submitNewTask(e)}>
           <label htmlFor={promptFieldId} className="sr-only">
             Financial comparison request and verified calculator inputs
@@ -827,7 +979,15 @@ export function FinanceAdvisor({
                   key={preset.id}
                   type="button"
                   className="advisor-chip"
-                  onClick={() => setPromptInput(preset.prompt)}
+                  onClick={() => {
+                    if (sampleId !== preset.id) setSampleSnapshot(null);
+                    setUseSampleContext(true);
+                    setSampleError("");
+                    setSampleId(preset.id);
+                    setPromptInput(
+                      "Compare this selected synthetic scenario and recommend an option conditionally on its stated goal.",
+                    );
+                  }}
                 >
                   {preset.label}
                 </button>
@@ -836,7 +996,11 @@ export function FinanceAdvisor({
             <button
               type="submit"
               className="button primary"
-              disabled={submitting || (!demo && !promptInput.trim())}
+              disabled={
+                submitting ||
+                (!demo && !promptInput.trim()) ||
+                (useSampleContext && !sampleSnapshot)
+              }
             >
               {submitting ? (
                 <>
