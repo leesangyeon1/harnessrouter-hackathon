@@ -70,3 +70,39 @@ export async function workerRequest(request: Request, id?: string) {
     return failure(error);
   }
 }
+export async function quantPerformanceRequest(request: Request) {
+  try {
+    const { token } = await verifiedSession();
+    const rawCycleId = new URL(request.url).searchParams.get("cycle_id");
+    const cycleId = rawCycleId ? rawCycleId.trim() : "";
+    if (cycleId && !validTokenId(cycleId))
+      return json({ detail: "Invalid evaluation cycle id." }, 400);
+    const query = cycleId ? `?cycle_id=${encodeURIComponent(cycleId)}` : "";
+    const response = await fetch(
+      `${apiBase()}/v1/admin/quant-performance${query}`,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+        redirect: "error",
+        credentials: "omit",
+        signal: AbortSignal.timeout(15000),
+      },
+    );
+    if (!response.ok)
+      return json(
+        {
+          detail:
+            response.status === 403
+              ? "Administrator access is no longer available."
+              : response.status === 404
+                ? "That evaluation cycle could not be found."
+                : "Quant performance telemetry could not be loaded.",
+        },
+        response.status,
+      );
+    return json(await response.json(), response.status);
+  } catch (error) {
+    return failure(error);
+  }
+}

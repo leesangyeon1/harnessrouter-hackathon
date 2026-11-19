@@ -169,6 +169,23 @@ const server = http.createServer(async (req, res) => {
       send({ detail: "admin required" }, 403);
       return;
     }
+    if (path === "/v1/admin/quant-performance" && req.method === "GET") {
+      send({
+        cycles: [],
+        selected_cycle: null,
+        worker_nodes: tokens.map((t) => ({
+          worker_id: t.id,
+          created_at: t.created_at,
+          revoked_at: t.revoked_at,
+          active_leases: 0,
+          completed_units_in_cycle: 0,
+          completed_units_total: 0,
+          last_completed_at: null,
+        })),
+        event_log: [],
+      });
+      return;
+    }
     if (req.method === "GET") {
       send({ tokens });
       return;

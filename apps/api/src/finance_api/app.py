@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
-from finance_api import cycles, plaid_ingest, reports
+from finance_api import admin_performance, cycles, plaid_ingest, reports
 from finance_api.auth import JWKS_URL, IdTokenVerifier, current_role, current_user, require_admin
 from finance_api.db import create_pool
 from finance_api.health import create_health_app
@@ -103,6 +103,7 @@ def create_app(
     app.include_router(plaid_ingest.router)
     app.include_router(reports.router)
     app.include_router(cycles.router)
+    app.include_router(admin_performance.router)
 
     @app.exception_handler(PlaidError)
     def plaid_refused(_: Request, error: PlaidError) -> JSONResponse:

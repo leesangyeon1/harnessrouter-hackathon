@@ -13,9 +13,11 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+from typing import Any
 from uuid import uuid4
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from finance_api.db import verify_runtime_role
 from finance_api.observability import (
@@ -52,6 +54,17 @@ def validate_sandbox_and_paper_env() -> None:
         raise ValueError(f"PLAID_HOST names {plaid_host}; only {SANDBOX_HOST} may be used")
 
 
+def _record_job_event(database_url: str, source: str, event: str, detail: dict[str, Any]) -> None:
+    try:
+        with psycopg.connect(database_url, autocommit=True) as log_conn:
+            log_conn.execute(
+                "INSERT INTO job_events (source, event, detail) VALUES (%s, %s, %s)",
+                (source, event, Jsonb(detail)),
+            )
+    except psycopg.Error:
+        logger.debug("Skipping job_events write for %s/%s", source, event)
+
+
 def run_job(
     job_name: str,
     database_url: str,
@@ -85,6 +98,12 @@ def run_job(
             if entrypoint_override is not None:
                 produced_cycle = entrypoint_override(conn)
             else:
+                _record_job_event(
+                    database_url,
+                    job_name,
+                    "job_started",
+                    {"execution_id": execution_id},
+                )
                 try:
                     module = importlib.import_module(module_name)
                 except ModuleNotFoundError as exc:
@@ -93,11 +112,24 @@ def run_job(
                     ) from exc
                 runner: Callable[[psycopg.Connection], str | None] = module.run_job
                 produced_cycle = runner(conn)
+                _record_job_event(
+                    database_url,
+                    job_name,
+                    "job_succeeded",
+                    {"execution_id": execution_id, "cycle_id": produced_cycle},
+                )
 
             if produced_cycle:
                 cycle_id_var.set(produced_cycle)
             logger.info("Completed job %s", job_name, extra={"job_name": job_name})
-    except Exception:
+    except Exception as exc:
+        if entrypoint_override is None:
+            _record_job_event(
+                database_url,
+                job_name,
+                "job_failed",
+                {"execution_id": execution_id, "error_type": type(exc).__name__},
+            )
         logger.exception("Job %s failed", job_name, extra={"job_name": job_name})
         raise
     finally:

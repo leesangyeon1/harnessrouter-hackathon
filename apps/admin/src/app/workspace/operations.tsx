@@ -6,6 +6,7 @@ import {
   Activity,
   ArrowLeft,
   ArrowRight,
+  BarChart3,
   Check,
   CheckCircle2,
   CircleAlert,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import { adminAuth, configured } from "@/lib/firebase";
 import { sessionRequest } from "@/lib/session";
+import { PerformanceLog } from "./performance-log";
 const operationRequest = (path: string, init: RequestInit = {}) =>
   sessionRequest(path, init, async () => {
     if (!configured()) return null;
@@ -32,7 +34,7 @@ const operationRequest = (path: string, init: RequestInit = {}) =>
     return auth.currentUser ? auth.currentUser.getIdToken() : null;
   });
 type Token = { id: string; created_at: string; revoked_at: string | null };
-type Section = "workers" | "cycles" | "policies" | "usage";
+type Section = "workers" | "performance" | "cycles" | "policies" | "usage";
 const stamp = (value: string) =>
   `${new Date(value).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
@@ -164,6 +166,7 @@ export function Operations({
           {(
             [
               { id: "workers", label: "Worker credentials", icon: KeyRound },
+              { id: "performance", label: "Performance log", icon: BarChart3 },
               { id: "cycles", label: "Evaluation cycles", icon: Activity },
               { id: "policies", label: "Mode policies", icon: Layers },
               { id: "usage", label: "Usage & issues", icon: Database },
@@ -206,6 +209,7 @@ export function Operations({
               {
                 {
                   workers: "Worker credentials",
+                  performance: "Performance log",
                   cycles: "Evaluation cycles",
                   policies: "Mode policies",
                   usage: "Usage & issues",
@@ -221,10 +225,20 @@ export function Operations({
         <main id="ops-main">
           <div className="ops-heading">
             <div>
-              <p className="eyebrow">YOUR WORKSPACE, BEHIND THE SCENES</p>
-              <h1>Keep things moving.</h1>
+              <p className="eyebrow">
+                {section === "performance" || section === "cycles"
+                  ? "QUANT EVALUATION TELEMETRY"
+                  : "YOUR WORKSPACE, BEHIND THE SCENES"}
+              </p>
+              <h1>
+                {section === "performance" || section === "cycles"
+                  ? "Quant performance log."
+                  : "Keep things moving."}
+              </h1>
               <p className="muted">
-                A clear view of your compute access and operations.
+                {section === "performance" || section === "cycles"
+                  ? "Cycle-scoped model returns, Sharpe ratios, drawdowns, confirmation gates, and worker node logs."
+                  : "A clear view of your compute access and operations."}
               </p>
             </div>
             {section === "workers" && (
@@ -426,6 +440,16 @@ export function Operations({
                 revoked token cannot continue claiming or uploading work.
               </p>
             </>
+          ) : section === "performance" || section === "cycles" ? (
+            <PerformanceLog
+              request={operationRequest}
+              onUnauthorized={() => {
+                setTokens([]);
+                setSecret("");
+                router.replace("/");
+                router.refresh();
+              }}
+            />
           ) : (
             <section className="ops-panel">
               <div className="ops-empty">
@@ -433,19 +457,15 @@ export function Operations({
                 <h2>
                   {
                     {
-                      cycles: "Cycle visibility is coming",
                       policies: "Policy publishing is not connected",
                       usage: "Operational metrics are not connected",
-                      workers: "",
                     }[section]
                   }
                 </h2>
                 <p>
-                  {section === "cycles"
-                    ? "Cycle leaderboards will be scoped by evaluation cycle, symbol and mode, preserving the pinned bars, model-set version, policy and costs."
-                    : section === "policies"
-                      ? "Policy versions are immutable. A later policy must not change the winners or orders of an existing cycle."
-                      : "Usage, issue and job visibility will appear when their read APIs are available. No privileged job-start action is exposed."}
+                  {section === "policies"
+                    ? "Policy versions are immutable. A later policy must not change the winners or orders of an existing cycle."
+                    : "Usage and customer issue visibility will appear when their read APIs are available. No privileged job-start action is exposed."}
                 </p>
                 <button
                   className="button secondary"

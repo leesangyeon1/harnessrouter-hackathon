@@ -449,6 +449,12 @@ jobs:
           ADMIN_API_UNAUTH="$(curl -sS -o /dev/null -w '%{http_code}' "${ADMIN_URL}/api/worker-tokens")"
           test "${ADMIN_API_UNAUTH}" = "401"
 
+          ADMIN_PERF_UNAUTH="$(curl -sS -o /dev/null -w '%{http_code}' "${ADMIN_URL}/api/quant-performance")"
+          test "${ADMIN_PERF_UNAUTH}" = "401"
+
+          API_PERF_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/admin/quant-performance")"
+          test "${API_PERF_UNAUTH}" = "401"
+
           API_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/me")"
           test "${API_UNAUTH}" = "401"
 

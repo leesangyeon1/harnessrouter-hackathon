@@ -13,6 +13,7 @@ import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
@@ -188,6 +189,23 @@ def create_worker_app(pool: ConnectionPool) -> FastAPI:
             if claimed is None:
                 return Response(status_code=status.HTTP_204_NO_CONTENT)
             unit = _held_unit(conn, claimed[0], worker_id)
+            conn.execute(
+                "INSERT INTO job_events (source, event, detail)"
+                " VALUES ('quant_worker', 'unit_claimed', %s)",
+                (
+                    Jsonb(
+                        {
+                            "unit_id": str(unit["id"]),
+                            "cycle_id": str(unit["cycle_id"]),
+                            "cycle_date": unit["cycle_date"].isoformat(),
+                            "symbol": unit["symbol"],
+                            "sector": unit["sector"],
+                            "worker_id": str(worker_id),
+                            "lease_expires_at": unit["lease_expires_at"].isoformat(),
+                        }
+                    ),
+                ),
+            )
         return {
             "unit_id": str(unit["id"]),
             "cycle_date": unit["cycle_date"].isoformat(),
@@ -208,39 +226,78 @@ def create_worker_app(pool: ConnectionPool) -> FastAPI:
     @app.post("/units/{unit_id}/result", status_code=status.HTTP_204_NO_CONTENT)
     def upload_result(unit_id: UUID, upload: ResultUpload, worker_id: worker) -> None:
         """Store the unit's result as uploaded. Nothing is computed here (D19)."""
+        rejected_detail: dict[str, Any] | None = None
         with pool.connection() as conn:
             unit = _held_unit(conn, unit_id, worker_id)
             reason = _mismatch(unit, _stored_bars(conn, unit), upload)
             if reason is not None:
-                raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, reason)
-            ticker = (unit["cycle_id"], unit["symbol"])
-            with conn.cursor() as cursor:
-                cursor.executemany(
-                    "INSERT INTO model_results (cycle_id, symbol, model_id,"
-                    " selection_net_return, selection_sharpe, selection_max_drawdown,"
-                    " confirmation_net_return, position)"
-                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                    [
-                        (
-                            *ticker,
-                            result.model_id,
-                            exact(result.selection.net_return),
-                            exact(result.selection.sharpe),
-                            exact(result.selection.max_drawdown),
-                            exact(result.confirmation.net_return),
-                            exact(result.next_position),
-                        )
-                        for result in upload.results
-                    ],
+                rejected_detail = {
+                    "unit_id": str(unit_id),
+                    "cycle_id": str(unit["cycle_id"]),
+                    "cycle_date": unit["cycle_date"].isoformat(),
+                    "symbol": unit["symbol"],
+                    "sector": unit["sector"],
+                    "worker_id": str(worker_id),
+                    "reason": reason,
+                }
+            else:
+                ticker = (unit["cycle_id"], unit["symbol"])
+                with conn.cursor() as cursor:
+                    cursor.executemany(
+                        "INSERT INTO model_results (cycle_id, symbol, model_id,"
+                        " selection_net_return, selection_sharpe, selection_max_drawdown,"
+                        " confirmation_net_return, position)"
+                        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        [
+                            (
+                                *ticker,
+                                result.model_id,
+                                exact(result.selection.net_return),
+                                exact(result.selection.sharpe),
+                                exact(result.selection.max_drawdown),
+                                exact(result.confirmation.net_return),
+                                exact(result.next_position),
+                            )
+                            for result in upload.results
+                        ],
+                    )
+                    cursor.executemany(
+                        "INSERT INTO winners (cycle_id, symbol, mode, model_id)"
+                        " VALUES (%s, %s, %s, %s)",
+                        [
+                            (*ticker, "stable", upload.winners.stable),
+                            (*ticker, "aggressive", upload.winners.aggressive),
+                        ],
+                    )
+                conn.execute("UPDATE work_units SET completed_at = now() WHERE id = %s", (unit_id,))
+                conn.execute(
+                    "INSERT INTO job_events (source, event, detail)"
+                    " VALUES ('quant_worker', 'unit_completed', %s)",
+                    (
+                        Jsonb(
+                            {
+                                "unit_id": str(unit_id),
+                                "cycle_id": str(unit["cycle_id"]),
+                                "cycle_date": unit["cycle_date"].isoformat(),
+                                "symbol": unit["symbol"],
+                                "sector": unit["sector"],
+                                "worker_id": str(worker_id),
+                                "models_evaluated": len(upload.results),
+                                "stable_winner": upload.winners.stable,
+                                "aggressive_winner": upload.winners.aggressive,
+                            }
+                        ),
+                    ),
                 )
-                cursor.executemany(
-                    "INSERT INTO winners (cycle_id, symbol, mode, model_id)"
-                    " VALUES (%s, %s, %s, %s)",
-                    [
-                        (*ticker, "stable", upload.winners.stable),
-                        (*ticker, "aggressive", upload.winners.aggressive),
-                    ],
+        if rejected_detail is not None:
+            with pool.connection() as log_conn:
+                log_conn.execute(
+                    "INSERT INTO job_events (source, event, detail)"
+                    " VALUES ('quant_worker', 'unit_rejected', %s)",
+                    (Jsonb(rejected_detail),),
                 )
-            conn.execute("UPDATE work_units SET completed_at = now() WHERE id = %s", (unit_id,))
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, str(rejected_detail["reason"])
+            )
 
     return app
