@@ -59,14 +59,29 @@ if ! gcloud iam service-accounts describe "${CICD_SA_EMAIL}" --project="${GCP_PR
 fi
 
 for role in \
-  roles/artifactregistry.writer \
-  roles/run.developer \
-  roles/iam.serviceAccountUser; do
+  roles/artifactregistry.admin \
+  roles/run.admin \
+  roles/cloudsql.admin \
+  roles/secretmanager.admin \
+  roles/cloudtasks.admin \
+  roles/cloudscheduler.admin \
+  roles/logging.configWriter \
+  roles/monitoring.admin \
+  roles/serviceusage.serviceUsageAdmin \
+  roles/iam.serviceAccountAdmin \
+  roles/iam.serviceAccountUser \
+  roles/resourcemanager.projectIamAdmin; do
   gcloud projects add-iam-policy-binding "${GCP_PROJECT_ID}" \
     --member="serviceAccount:${CICD_SA_EMAIL}" \
     --role="${role}" \
     --quiet >/dev/null
 done
+
+gcloud storage buckets add-iam-policy-binding "gs://${TF_STATE_BUCKET}" \
+  --member="serviceAccount:${CICD_SA_EMAIL}" \
+  --role="roles/storage.objectAdmin" \
+  --project="${GCP_PROJECT_ID}" \
+  --quiet >/dev/null
 
 echo "==> Ensuring Workload Identity Pool ${POOL_ID}..."
 if ! gcloud iam workload-identity-pools describe "${POOL_ID}" \
