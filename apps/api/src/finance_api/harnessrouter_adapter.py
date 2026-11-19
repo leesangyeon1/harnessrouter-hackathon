@@ -143,10 +143,15 @@ def produced_files(resp_obj: Json) -> list[Json]:
     return out
 
 
+_UPSTREAM_ERR_RE = re.compile(r"model provider refused|\(request id:", re.IGNORECASE)
+
+
 def to_progress(ev: Json) -> Json | None:
     """Convert an upstream SSE event into a sanitized progress frame safe for browsers."""
     ev_type = ev.get("type")
     if ev_type == "response.output_text.delta" and isinstance(ev.get("delta"), str):
+        if _UPSTREAM_ERR_RE.search(ev["delta"]):
+            return None
         return {"kind": "text", "delta": ev["delta"]}
     item = ev.get("item")
     if ev_type == "response.output_item.added" and isinstance(item, dict):
@@ -278,7 +283,7 @@ class HarnessRouter:
             body["user"] = user
         if previous_response_id:
             body["previous_response_id"] = previous_response_id
-        for key in ("max_step", "timeout_seconds", "max_cost_usd"):
+        for key in ("max_step", "timeout_seconds", "max_cost_usd", "model"):
             if budgets.get(key) is not None:
                 body[key] = budgets[key]
         if mode == "stream":
@@ -320,33 +325,43 @@ class HarnessRouter:
         sid = ""
         terminal: Json | None = None
 
-        try:
-            with (
-                self._client(timeout_budget) as client,
-                client.stream("POST", "/v1/responses", json=body, headers=req_headers) as resp,
-            ):
-                if not (200 <= resp.status_code < 300):
-                    resp.read()
-                    self._raise_for_error(resp)
-                for ev in parse_sse(resp.iter_lines()):
-                    r = ev.get("response")
-                    if isinstance(r, dict):
-                        rid = r.get("id")
-                        if isinstance(rid, str) and rid and not response_id:
-                            response_id = rid
-                        rmeta = r.get("metadata")
-                        s_val = rmeta.get("session_id") if isinstance(rmeta, dict) else None
-                        if isinstance(s_val, str) and s_val and not sid:
-                            sid = s_val
-                            if on_ids and response_id:
-                                on_ids(response_id, sid)
-                        if ev.get("type") in TERMINAL_EVENTS:
-                            terminal = r
-                    if on_event:
-                        on_event(ev)
-        except httpx.HTTPError:
-            if not response_id:
-                raise
+        for attempt in range(4):
+            try:
+                with (
+                    self._client(timeout_budget) as client,
+                    client.stream("POST", "/v1/responses", json=body, headers=req_headers) as resp,
+                ):
+                    if not (200 <= resp.status_code < 300):
+                        resp.read()
+                        self._raise_for_error(resp)
+                    for ev in parse_sse(resp.iter_lines()):
+                        r = ev.get("response")
+                        if isinstance(r, dict):
+                            rid = r.get("id")
+                            if isinstance(rid, str) and rid and not response_id:
+                                response_id = rid
+                            rmeta = r.get("metadata")
+                            s_val = rmeta.get("session_id") if isinstance(rmeta, dict) else None
+                            if isinstance(s_val, str) and s_val and not sid:
+                                sid = s_val
+                                if on_ids and response_id:
+                                    on_ids(response_id, sid)
+                            if ev.get("type") in TERMINAL_EVENTS:
+                                terminal = r
+                        if on_event:
+                            on_event(ev)
+                break
+            except HRError as err:
+                if response_id or not err.retryable or attempt == 3:
+                    raise
+                delay = min(max(err.retry_after_seconds or (3.0 * (attempt + 1)), 1.0), 30.0)
+                self._sleep(delay)
+            except httpx.HTTPError:
+                if response_id:
+                    break
+                if attempt == 3:
+                    raise
+                self._sleep(3.0 * (attempt + 1))
 
         if terminal is not None:
             return terminal

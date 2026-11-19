@@ -154,6 +154,17 @@ def test_adapter_sse_parsing_preview_signing_paths_and_redirect_refusal(
         "kind": "activity",
         "label": "Checking authoritative public sources",
     }
+    assert (
+        to_progress(
+            {
+                "type": "response.output_text.delta",
+                "delta": (
+                    "The model provider refused the request (403: Forbidden. (request id: 99))"
+                ),
+            }
+        )
+        is None
+    )
 
     key_bytes = b"\x11" * 32
     tok = sign_preview("subj_abc", signing_key=key_bytes, ttl_seconds=60, now=1_900_000_000)
@@ -382,3 +393,83 @@ def test_agent_search_routes_enforce_tenancy_followup_files_and_preview(
         "harness_id": MARKET_SEARCH_HARNESS_ID,
         "session_id": SID,
     }
+
+
+def test_failed_response_strips_raw_upstream_error_from_browser_payload(
+    api_url: str,
+    verifier: IdTokenVerifier,
+    make_token: Callable[..., str],
+    no_plaid: PlaidClient,
+    secret_box: SecretBox,
+) -> None:
+    upstream_err_text = (
+        "The model provider refused the request (403: Forbidden. (request id: req_secret_403))"
+    )
+
+    def handler(_req: httpx.Request) -> httpx.Response:
+        created = {
+            "id": RID,
+            "status": "in_progress",
+            "metadata": {"session_id": SID},
+            "output": [],
+        }
+        failed = {
+            "id": RID,
+            "object": "response",
+            "status": "failed",
+            "metadata": {"session_id": SID},
+            "error": {"code": "turn_failed", "message": upstream_err_text},
+            "output": [
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": upstream_err_text}],
+                }
+            ],
+        }
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/event-stream"},
+            content=_sse_bytes(
+                [
+                    {"type": "response.created", "response": created},
+                    {"type": "response.failed", "response": failed},
+                ]
+            ),
+        )
+
+    hr = HarnessRouter(
+        api_key="sk-hr-" + secrets.token_hex(12),
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _s: None,
+    )
+    app = create_app(
+        create_pool(api_url, open_pool=False),
+        verifier,
+        no_plaid,
+        secret_box,
+        harness_router=hr,
+        preview_signing_key=b"\x66" * 32,
+    )
+    alice = f"alice-fail-{uuid4().hex[:8]}"
+    alice_headers = {"Authorization": f"Bearer {make_token(sub=alice)}"}
+
+    with TestClient(app) as client:
+        resp = client.post("/v1/agent-tasks", headers=alice_headers, json={"input": "Verify TLT"})
+        assert resp.status_code == 201
+        task_id = resp.json()["id"]
+        detail: dict[str, Any] = {}
+        for _ in range(40):
+            detail = client.get(f"/v1/agent-tasks/{task_id}", headers=alice_headers).json()
+            if detail.get("status") == "failed":
+                break
+            time.sleep(0.05)
+
+        assert detail["status"] == "failed"
+        assert detail["answer"] == ""
+        assert detail["structured_result"] is None
+        assert detail["can_continue"] is False
+        serialized = json.dumps(detail)
+        assert "403" not in serialized
+        assert "req_secret_403" not in serialized
+        assert "model provider refused" not in serialized.lower()

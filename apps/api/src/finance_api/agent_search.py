@@ -134,7 +134,8 @@ def _format_task_for_browser(
 ) -> dict[str, Any]:
     task_id: UUID = row["id"]
     raw_status = str(row["status"])
-    answer = str(row.get("result_text") or "")
+    hide_answer = raw_status in ("failed", "cancelled")
+    answer = "" if hide_answer else str(row.get("result_text") or "")
     raw_files_col = row.get("files")
     stored_files: list[Any] = raw_files_col if isinstance(raw_files_col, list) else []
 
@@ -175,7 +176,7 @@ def _format_task_for_browser(
         "query": str(row.get("query_text") or ""),
         "parent_task_id": None if row.get("parent_task_id") is None else str(row["parent_task_id"]),
         "answer": answer,
-        "structured_result": parse_structured_answer(answer),
+        "structured_result": None if hide_answer else parse_structured_answer(answer),
         "files": public_files,
         "preview_url": preview_url,
         "can_continue": raw_status in ("completed", "incomplete") and has_response_id,
@@ -215,7 +216,13 @@ def _settle_response_in_db(
     inc_reason = (
         str(inc_details.get("reason") or "") if isinstance(inc_details, dict) else ""
     ) or None
-    text = answer_text(resp_obj)
+    text = "" if final_status in ("failed", "cancelled") else answer_text(resp_obj)
+    if final_status == "failed":
+        logger.warning(
+            "HarnessRouter task %s ended with status=failed (response_id=%s)",
+            task_id,
+            response_id,
+        )
 
     settled_usd = Decimal("0")
     usage = resp_obj.get("usage")

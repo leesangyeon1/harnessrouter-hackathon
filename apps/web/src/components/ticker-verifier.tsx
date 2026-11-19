@@ -101,7 +101,12 @@ export function TickerVerifier({
           const refreshed = await client.getAgentTask(task.id);
           setActiveTask(refreshed);
           upsertTaskList(refreshed);
-          if (isTerminal(refreshed.status)) break;
+          if (isTerminal(refreshed.status)) {
+            if (refreshed.status === "failed" || refreshed.status === "cancelled") {
+              setStreamDelta("");
+            }
+            break;
+          }
         } catch (caught) {
           if (!abort.signal.aborted) {
             setError(
@@ -497,7 +502,9 @@ export function TickerVerifier({
                 )}
             </>
           ) : (
-            activeTask.answer && (
+            activeTask.answer &&
+            activeTask.status !== "failed" &&
+            activeTask.status !== "cancelled" && (
               <pre
                 className="verifier-stream-preview"
                 style={{ maxHeight: 320, marginTop: 12 }}
