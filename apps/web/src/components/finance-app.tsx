@@ -757,6 +757,7 @@ export function FinanceApp() {
                 demo ? (
                   <button
                     className="button primary"
+                    key="cycle-signin"
                     onClick={() => setDialog("auth")}
                   >
                     Sign in for latest cycle

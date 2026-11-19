@@ -113,16 +113,17 @@ test("overview meets WCAG AA automated checks", async ({ page }) => {
   const results = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
     .analyze();
-  await test
-    .info()
-    .attach("accessibility", {
-      body: JSON.stringify(results.violations, null, 2),
-      contentType: "application/json",
-    });
+  await test.info().attach("accessibility", {
+    body: JSON.stringify(results.violations, null, 2),
+    contentType: "application/json",
+  });
   expect(
     results.violations.map((v) => ({
       id: v.id,
-      targets: v.nodes.map((n) => n.target),
+      targets: v.nodes.map((n) => ({
+        target: n.target,
+        summary: n.failureSummary,
+      })),
     })),
   ).toEqual([]);
 });
@@ -150,7 +151,10 @@ test("secondary views preserve readable and keyboard-accessible content", async 
       ...result.violations.map((v) => ({
         view: label,
         id: v.id,
-        targets: v.nodes.map((n) => n.target),
+        targets: v.nodes.map((n) => ({
+          target: n.target,
+          summary: n.failureSummary,
+        })),
       })),
     );
   }
