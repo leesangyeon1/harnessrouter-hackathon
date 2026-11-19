@@ -13,7 +13,11 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from finance_api.agent_search import ADVISOR_HARNESS_ID, MARKET_SEARCH_HARNESS_ID
+from finance_api.agent_search import (
+    ADVISOR_HARNESS_ID,
+    MARKET_SEARCH_HARNESS_ID,
+    QUANT_EVAL_HARNESS_ID,
+)
 from finance_api.app import create_app
 from finance_api.auth import IdTokenVerifier
 from finance_api.db import create_pool
@@ -39,6 +43,36 @@ RID_FOLLOW = "resp_test_002"
 SID_ADV = "hsess_adv_001"
 RID_ADV = "resp_adv_001"
 RID_ADV_FOLLOW = "resp_adv_002"
+SID_QUANT = "hsess_quant_001"
+RID_QUANT = "resp_quant_001"
+
+SAMPLE_QUANT_JSON = {
+    "status": "ok",
+    "simulation_label": "SIMULATED",
+    "evaluations": [
+        {
+            "cycle_id": "sim-cycle-2026-11-18-aapl",
+            "symbol": "AAPL",
+            "pinned_identities": {"model_set_version": "daily-v1", "policy_version": 1},
+            "baseline": {
+                "model_id": "M00",
+                "selection": {"net_return": 0.14, "sharpe": 1.12, "max_drawdown": 0.08},
+                "confirmation": {"net_return": 0.05, "sharpe": 1.05, "max_drawdown": 0.04},
+            },
+            "candidate_metrics": [
+                {
+                    "model_id": "M03",
+                    "selection": {"net_return": 0.18, "sharpe": 1.65, "max_drawdown": 0.07},
+                    "confirmation": {"net_return": 0.06, "sharpe": 1.4, "max_drawdown": 0.03},
+                }
+            ],
+            "stable_winner": "M03",
+            "aggressive_winner": "M03",
+            "reasons": {"stable": "Highest Sharpe <= 20% drawdown with positive confirmation"},
+        }
+    ],
+    "issues": [],
+}
 
 SAMPLE_ADVISOR_MARKDOWN = (
     "## Summary\nOption B reduces total interest by $612.40.\n\n"
@@ -253,12 +287,17 @@ def test_agent_routes_support_advisor_and_search_harnesses_with_tenancy_and_file
         if req.method == "POST" and req.url.path == "/v1/responses":
             payload = json.loads(req.content.decode("utf-8"))
             recorded_posts.append({"headers": dict(req.headers), "body": payload})
-            is_advisor = payload["metadata"]["harness_id"] == ADVISOR_HARNESS_ID
-            sid = SID_ADV if is_advisor else SID
-            if is_advisor:
+            target_hid = payload["metadata"]["harness_id"]
+            if target_hid == ADVISOR_HARNESS_ID:
+                sid = SID_ADV
                 rid = RID_ADV_FOLLOW if payload.get("previous_response_id") else RID_ADV
                 text = SAMPLE_ADVISOR_MARKDOWN
+            elif target_hid == QUANT_EVAL_HARNESS_ID:
+                sid = SID_QUANT
+                rid = RID_QUANT
+                text = json.dumps(SAMPLE_QUANT_JSON)
             else:
+                sid = SID
                 rid = RID_FOLLOW if payload.get("previous_response_id") else RID
                 text = json.dumps(SAMPLE_AGENT_JSON)
             created = {
@@ -283,6 +322,7 @@ def test_agent_routes_support_advisor_and_search_harnesses_with_tenancy_and_file
         if req.method == "GET" and (
             req.url.path.startswith(f"/v1/sessions/{SID}/files")
             or req.url.path.startswith(f"/v1/sessions/{SID_ADV}/files")
+            or req.url.path.startswith(f"/v1/sessions/{SID_QUANT}/files")
         ):
             return httpx.Response(200, json={"session_id": SID, "files": FILES})
         if req.method == "GET" and (
@@ -412,16 +452,48 @@ def test_agent_routes_support_advisor_and_search_harnesses_with_tenancy_and_file
         assert detail["structured_result"]["results"][0]["symbol"] == "TLT"
         assert detail["can_continue"] is True
 
+        # 3. Quant evaluator bundle builder + task execution sends QUANT_EVAL_HARNESS_ID.
+        bundle_resp = client.get("/v1/agent-tasks/quant-bundle?symbol=AAPL", headers=alice_headers)
+        assert bundle_resp.status_code == 200
+        bundle = bundle_resp.json()
+        assert bundle["pinned_identities"]["symbol"] == "AAPL"
+        assert bundle["pinned_identities"]["model_set_version"] == "daily-v1"
+        assert bundle["pinned_identities"]["bars_count"] >= 250
+        assert "def evaluate(" in bundle["prompt"]
+
+        q_resp = client.post(
+            "/v1/agent-tasks",
+            headers=alice_headers,
+            json={"input": bundle["prompt"], "feature_key": "quant_eval"},
+        )
+        assert q_resp.status_code == 201
+        q_id = q_resp.json()["id"]
+        assert q_resp.json()["feature_key"] == "quant_eval"
+
+        q_detail: dict[str, Any] = {}
+        for _ in range(40):
+            q_detail = client.get(f"/v1/agent-tasks/{q_id}", headers=alice_headers).json()
+            if q_detail.get("status") == "completed":
+                break
+            time.sleep(0.05)
+
+        assert q_detail["status"] == "completed"
+        assert q_detail["quant_result"]["simulation_label"] == "SIMULATED"
+        assert q_detail["quant_result"]["evaluations"][0]["stable_winner"] == "M03"
+
         # Ensure zero upstream secrets or internal IDs leak to browser.
-        raw_detail_str = json.dumps([adv_detail, detail])
+        raw_detail_str = json.dumps([adv_detail, detail, q_detail])
         for secret_or_id in (
             test_hr_key,
             ADVISOR_HARNESS_ID,
+            QUANT_EVAL_HARNESS_ID,
             MARKET_SEARCH_HARNESS_ID,
             SID,
             SID_ADV,
+            SID_QUANT,
             RID,
             RID_ADV,
+            RID_QUANT,
             "download_url",
         ):
             assert secret_or_id not in raw_detail_str
@@ -479,8 +551,8 @@ def test_agent_routes_support_advisor_and_search_harnesses_with_tenancy_and_file
             == 404
         )
 
-    assert len(recorded_posts) == 3
-    adv_first, adv_second, search_first = recorded_posts
+    assert len(recorded_posts) == 4
+    adv_first, adv_second, search_first, quant_first = recorded_posts
     assert adv_first["headers"]["uhp-version"] == "2026-09-28"
     assert adv_first["body"]["user"] == alice
     assert adv_first["body"]["metadata"] == {"harness_id": ADVISOR_HARNESS_ID}
@@ -496,6 +568,10 @@ def test_agent_routes_support_advisor_and_search_harnesses_with_tenancy_and_file
     assert search_first["body"]["user"] == alice
     assert search_first["body"]["metadata"] == {"harness_id": MARKET_SEARCH_HARNESS_ID}
     assert "previous_response_id" not in search_first["body"]
+
+    assert quant_first["body"]["user"] == alice
+    assert quant_first["body"]["metadata"] == {"harness_id": QUANT_EVAL_HARNESS_ID}
+    assert "previous_response_id" not in quant_first["body"]
 
 
 def test_failed_response_strips_raw_upstream_error_from_browser_payload(

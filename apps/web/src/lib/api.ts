@@ -46,7 +46,41 @@ export type StructuredSearchResult = {
   limitations: string[];
   clarification: string | null;
 };
-export type AgentFeatureKey = "advisor" | "search";
+export type AgentFeatureKey = "advisor" | "quant_eval" | "search";
+export type QuantEvaluationItem = {
+  cycle_id?: string | null;
+  symbol?: string | null;
+  pinned_identities?: Record<string, unknown> | null;
+  baseline?: Record<string, unknown> | null;
+  candidate_metrics?: Record<string, unknown>[] | Record<string, unknown> | null;
+  stable_winner?: string | null;
+  aggressive_winner?: string | null;
+  reasons?: Record<string, unknown> | unknown[] | string | null;
+};
+export type QuantEvaluationResult = {
+  status: string;
+  simulation_label?: string | null;
+  evaluations: QuantEvaluationItem[];
+  issues?: unknown[];
+};
+export type QuantEvaluationBundle = {
+  prompt: string;
+  pinned_identities: {
+    cycle_id: string;
+    symbol: string;
+    sector: string;
+    data_origin: string;
+    model_set_version: string;
+    policy_version: number;
+    policy_hash: string;
+    costs_hash: string;
+    cost_per_side: number;
+    bars_count: number;
+    bars_hash: string;
+    confirmation_bars: number;
+  };
+  available_cycle_symbols: string[];
+};
 export type AgentTaskFile = {
   path: string;
   filename: string;
@@ -69,6 +103,7 @@ export type AgentTask = {
   parent_task_id: string | null;
   answer: string;
   structured_result: StructuredSearchResult | null;
+  quant_result?: QuantEvaluationResult | null;
   files: AgentTaskFile[];
   preview_url: string | null;
   can_continue: boolean;
@@ -302,6 +337,15 @@ export class FinanceApi {
   }
   previewFullUrl(previewPath: string): string {
     return `${this.origin}${previewPath}`;
+  }
+  async getQuantBundle(
+    symbol: string,
+    mode: "auto" | "stored" | "sample" = "auto",
+  ): Promise<QuantEvaluationBundle> {
+    const qs = `symbol=${encodeURIComponent(symbol)}&mode=${encodeURIComponent(mode)}`;
+    return (await this.request(
+      `/v1/agent-tasks/quant-bundle?${qs}`,
+    )) as QuantEvaluationBundle;
   }
   async startAgentTask(
     input: string,

@@ -1,9 +1,11 @@
-"""Authenticated Personal Finance Advisor & Market Ticker Search routes on HarnessRouter Cloud.
+"""Authenticated Advisor, Quant Evaluator & Ticker Search routes on HarnessRouter Cloud.
 
 Maps product features strictly on the server:
-- `advisor` -> `chrn_e353c7f7ce02811c763f7150b10b3139` (`Personal Finance Advisor`, `hermes`,
+- `advisor`    -> `chrn_e353c7f7ce02811c763f7150b10b3139` (`Personal Finance Advisor`, `hermes`,
   `deepseek-v4-pro`, per-user memory via signed-in `user_id`)
-- `search`  -> `chrn_b431839c5f1318c5ab641703b8cd0279` (`Market ticker search`, `hermes`,
+- `quant_eval` -> `chrn_938e9e9f916aeaf09c789c506172c27b` (`Quant strategy evaluator`, `hermes`,
+  `deepseek-v4-pro`, isolated CPU execution of supplied `finance_core` Python code)
+- `search`     -> `chrn_b431839c5f1318c5ab641703b8cd0279` (`Market ticker search`, `hermes`,
   `deepseek-v4-pro`)
 
 Keeps `HR_API_KEY`, `harness_id`, `response_id`, `session_id`, and upstream `download_url`s
@@ -13,11 +15,15 @@ strictly on the server and enforces PostgreSQL Forced RLS per user.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import inspect
 import json
 import logging
+import math
 import threading
 from collections.abc import AsyncIterator, Callable
-from datetime import datetime
+from dataclasses import asdict
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
@@ -30,6 +36,7 @@ from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 from pydantic import BaseModel, ConfigDict, Field
 
+import finance_core.quant as fc_quant
 from finance_api.auth import current_user
 from finance_api.db import tenant_transaction
 from finance_api.harnessrouter_adapter import (
@@ -49,19 +56,31 @@ from finance_api.harnessrouter_adapter import (
     verify_preview,
 )
 from finance_api.sealing import SecretBox
+from finance_core.quant import (
+    DEFAULT_COSTS,
+    DEFAULT_POLICY,
+    MODEL_SET_VERSION,
+    Bar,
+    ModePolicy,
+    TradeCosts,
+    bars_digest,
+)
 
 logger = logging.getLogger(__name__)
 
 ADVISOR_HARNESS_ID = "chrn_e353c7f7ce02811c763f7150b10b3139"
+QUANT_EVAL_HARNESS_ID = "chrn_938e9e9f916aeaf09c789c506172c27b"
 MARKET_SEARCH_HARNESS_ID = "chrn_b431839c5f1318c5ab641703b8cd0279"
 
-FeatureKey = Literal["advisor", "search"]
+FeatureKey = Literal["advisor", "quant_eval", "search"]
 
 HARNESS_BY_FEATURE: dict[FeatureKey, str] = {
     "advisor": ADVISOR_HARNESS_ID,
+    "quant_eval": QUANT_EVAL_HARNESS_ID,
     "search": MARKET_SEARCH_HARNESS_ID,
 }
 
+BOND_ETFS = frozenset({"TLT", "IEF", "SHY", "LQD", "HYG", "BND", "TIP"})
 DEFAULT_COST_CAP_USD = Decimal("1.00")
 DEFAULT_TIMEOUT_SECONDS = 600
 
@@ -70,18 +89,24 @@ User = Annotated[str, Depends(current_user)]
 
 _active_tasks: set[str] = set()
 _active_lock = threading.Lock()
+_FINANCE_CORE_QUANT_SOURCE = inspect.getsource(fc_quant)
 
 
 class CreateAgentTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    input: str = Field(min_length=1, max_length=8000)
+    input: str = Field(min_length=1, max_length=250_000)
     feature_key: FeatureKey | None = None
     follow_up_task_id: UUID | None = None
 
 
 def _resolve_feature_key(raw_kind: Any) -> FeatureKey:
-    return "search" if str(raw_kind) == "search" else "advisor"
+    val = str(raw_kind)
+    if val == "search":
+        return "search"
+    if val == "quant_eval":
+        return "quant_eval"
+    return "advisor"
 
 
 def _sanitize_file_entries(raw_files: list[Json]) -> list[dict[str, Any]]:
@@ -109,8 +134,7 @@ def _sanitize_file_entries(raw_files: list[Json]) -> list[dict[str, Any]]:
     return cleaned
 
 
-def parse_structured_answer(raw_text: str | None) -> dict[str, Any] | None:
-    """Parse JSON response matching the Market Ticker Search output contract if valid."""
+def _extract_json_dict(raw_text: str | None) -> dict[str, Any] | None:
     if not raw_text:
         return None
     stripped = raw_text.strip()
@@ -122,11 +146,124 @@ def parse_structured_answer(raw_text: str | None) -> dict[str, Any] | None:
         parsed = json.loads(stripped)
     except json.JSONDecodeError:
         return None
-    if not isinstance(parsed, dict):
+    return parsed if isinstance(parsed, dict) else None
+
+
+def parse_structured_answer(raw_text: str | None) -> dict[str, Any] | None:
+    """Parse JSON response matching the Market Ticker Search output contract if valid."""
+    parsed = _extract_json_dict(raw_text)
+    if parsed is None:
         return None
     if not isinstance(parsed.get("status"), str) or not isinstance(parsed.get("results"), list):
         return None
     return parsed
+
+
+def parse_quant_evaluation_answer(raw_text: str | None) -> dict[str, Any] | None:
+    """Parse JSON response matching the Quant Strategy Evaluator output contract if valid."""
+    parsed = _extract_json_dict(raw_text)
+    if parsed is None:
+        return None
+    if not isinstance(parsed.get("status"), str) or not isinstance(parsed.get("evaluations"), list):
+        return None
+    return parsed
+
+
+def _infer_sector(symbol: str) -> str:
+    upper = symbol.upper()
+    if "/" in upper or upper.endswith("-USD"):
+        return "crypto"
+    if upper in BOND_ETFS:
+        return "bond"
+    return "stock"
+
+
+def _synthetic_pinned_bars(symbol: str, count: int = 260) -> list[Bar]:
+    """Generate deterministic ascending daily OHLCV bars (>= 250) for standalone CPU simulation."""
+    seed_int = int(hashlib.sha256(symbol.upper().encode("utf-8")).hexdigest()[:8], 16)
+    base_price = (
+        64000.0
+        if _infer_sector(symbol) == "crypto"
+        else (92.0 if symbol.upper() in BOND_ETFS else 185.0)
+    )
+    price = base_price + (seed_int % 17)
+    cur_day = date(2025, 7, 1)
+    bars: list[Bar] = []
+    idx = 0
+    while len(bars) < count:
+        if cur_day.weekday() < 5:
+            drift = 0.0014
+            wave = 0.0085 * math.sin((idx + (seed_int % 11)) * 0.21) + 0.004 * math.cos(idx * 0.09)
+            open_p = round(price, 4)
+            close_p = round(max(1.0, open_p * (1.0 + drift + wave)), 4)
+            high_p = round(max(open_p, close_p) * 1.006, 4)
+            low_p = round(min(open_p, close_p) * 0.994, 4)
+            vol = float(1_500_000 + ((seed_int + idx * 97_531) % 3_200_000))
+            bars.append(Bar(cur_day.isoformat(), open_p, high_p, low_p, close_p, vol))
+            price = close_p
+            idx += 1
+        cur_day += timedelta(days=1)
+    return bars
+
+
+def _build_quant_eval_prompt(
+    *,
+    cycle_id: str,
+    symbol: str,
+    sector: str,
+    policy: ModePolicy,
+    costs: TradeCosts,
+    bars: list[Bar],
+    data_origin: str,
+) -> tuple[str, dict[str, Any]]:
+    window_bars = bars[-500:]
+    b_hash = bars_digest(window_bars)
+    p_hash = policy.digest
+    c_hash = costs.digest
+    cost_per_side = costs.for_sector(sector)
+
+    pinned_identities = {
+        "cycle_id": cycle_id,
+        "symbol": symbol,
+        "sector": sector,
+        "data_origin": data_origin,
+        "model_set_version": MODEL_SET_VERSION,
+        "candidate_models": ["M01", "M02", "M03", "M04", "M05", "M06", "M07", "M08", "M10", "M11"],
+        "baseline_model": "M00",
+        "policy_version": policy.version,
+        "policy": asdict(policy),
+        "policy_hash": p_hash,
+        "costs": asdict(costs),
+        "costs_hash": c_hash,
+        "cost_per_side": cost_per_side,
+        "bars_count": len(window_bars),
+        "bars_hash": b_hash,
+        "warmup_start_index": 61,
+        "confirmation_bars": policy.confirmation_bars,
+    }
+
+    input_payload = {
+        "cycle_id": cycle_id,
+        "symbol": symbol,
+        "sector": sector,
+        "pinned_identities": pinned_identities,
+        "bars": [asdict(b) for b in window_bars],
+    }
+
+    prompt = (
+        f"Evaluate finance_core daily-v1 models M01-M08, M10 and M11 (with M00 as baseline only) "
+        f"for cycle_id={cycle_id} and symbol={symbol} ({sector}).\n\n"
+        f"Execute ONLY the supplied verbatim `finance_core/quant.py` Python module below in your "
+        f"isolated execution environment against the supplied pinned JSON input payload, verify "
+        f"`bars_hash`, `policy_hash`, `costs_hash`, `model_set_version`, and `policy_version`, "
+        f"and return ONLY the required JSON object "
+        f"(`status`, `simulation_label`, `evaluations`, `issues`).\n\n"
+        f"### Supplied `finance_core/quant.py`\n"
+        f"```python\n{_FINANCE_CORE_QUANT_SOURCE}\n```\n\n"
+        f"### Supplied Pinned Evaluation Input JSON\n"
+        f"```json\n{json.dumps(input_payload, separators=(',', ':'))}\n```"
+    )
+    return prompt, pinned_identities
 
 
 def _seal_preview_subject(box: SecretBox, task_id: UUID, user_id: str) -> str:
@@ -142,6 +279,13 @@ def _open_preview_subject(box: SecretBox, subject_token: str) -> tuple[UUID, str
         return UUID(str(decoded["t"])), str(decoded["u"])
     except (InvalidToken, ValueError, KeyError, TypeError):
         return None
+
+
+def _summarize_stored_query(feature_key: FeatureKey, raw_query: str) -> str:
+    if feature_key == "quant_eval" and len(raw_query) > 240:
+        first_line = raw_query.splitlines()[0].strip()
+        return first_line[:240]
+    return raw_query
 
 
 def _format_task_for_browser(
@@ -192,16 +336,22 @@ def _format_task_for_browser(
     structured = (
         parse_structured_answer(answer) if feature_key == "search" and not hide_answer else None
     )
+    quant_result = (
+        parse_quant_evaluation_answer(answer)
+        if feature_key == "quant_eval" and not hide_answer
+        else None
+    )
 
     return {
         "id": str(task_id),
         "feature_key": feature_key,
         "status": raw_status,
         "incomplete_reason": row.get("incomplete_reason"),
-        "query": str(row.get("query_text") or ""),
+        "query": _summarize_stored_query(feature_key, str(row.get("query_text") or "")),
         "parent_task_id": None if row.get("parent_task_id") is None else str(row["parent_task_id"]),
         "answer": answer,
         "structured_result": structured,
+        "quant_result": quant_result,
         "files": public_files,
         "preview_url": preview_url,
         "can_continue": raw_status in ("completed", "incomplete") and has_response_id,
@@ -303,11 +453,12 @@ def _run_task_worker_thread(
     with _active_lock:
         _active_tasks.add(key_str)
     captured_sid = session_id or ""
-    connected_label = (
-        "Connected to finance advisor"
-        if feature_key == "advisor"
-        else "Connected to research agent"
-    )
+    connected_labels: dict[FeatureKey, str] = {
+        "advisor": "Connected to finance advisor",
+        "quant_eval": "Connected to CPU quant evaluator",
+        "search": "Connected to research agent",
+    }
+    connected_label = connected_labels[feature_key]
     try:
         hr = get_hr()
 
@@ -380,12 +531,118 @@ def _fetch_owned_task(pool: ConnectionPool, user_id: str, task_id: UUID) -> dict
             "SELECT id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
             " harness_task_id, session_id, status, query_text, parent_task_id,"
             " result_text, files, incomplete_reason, created_at, updated_at"
-            " FROM agent_tasks WHERE id = %s AND kind IN ('advisor', 'search')",
+            " FROM agent_tasks WHERE id = %s AND kind IN ('advisor', 'search', 'quant_eval')",
             (task_id,),
         ).fetchone()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Task not found.")
     return row
+
+
+@router.get("/quant-bundle")
+def build_quant_evaluation_bundle(
+    request: Request,
+    _user_id: User,
+    symbol: Annotated[str, Query(min_length=1, max_length=24)] = "AAPL",
+    mode: Annotated[Literal["auto", "stored", "sample"], Query()] = "auto",
+) -> dict[str, Any]:
+    """Build a self-contained `finance_core` Python + pinned bars evaluation bundle."""
+    clean_symbol = symbol.strip().upper()
+    pool: ConnectionPool = request.app.state.pool
+
+    available_cycle_symbols: list[str] = []
+    stored_match: dict[str, Any] | None = None
+
+    with pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
+        latest_cycle = cur.execute(
+            "SELECT c.id, c.cycle_date, c.model_set_version, c.costs, c.policy_version, p.policy"
+            " FROM cycles c"
+            " JOIN mode_policies p ON p.version = c.policy_version"
+            " ORDER BY c.cycle_date DESC, c.created_at DESC LIMIT 1"
+        ).fetchone()
+
+        if latest_cycle is not None:
+            sym_rows = cur.execute(
+                "SELECT s.symbol, s.sector, count(b.bar_date) AS bar_count"
+                " FROM selections s"
+                " LEFT JOIN selected_bars b"
+                "   ON b.cycle_id = s.cycle_id AND b.symbol = s.symbol"
+                " WHERE s.cycle_id = %s"
+                " GROUP BY s.symbol, s.sector"
+                " HAVING count(b.bar_date) >= 250"
+                " ORDER BY s.symbol LIMIT 16",
+                (latest_cycle["id"],),
+            ).fetchall()
+            available_cycle_symbols = [str(r["symbol"]) for r in sym_rows]
+
+            if mode in ("auto", "stored"):
+                matched_sel = next(
+                    (r for r in sym_rows if str(r["symbol"]).upper() == clean_symbol),
+                    None,
+                )
+                if matched_sel is not None:
+                    bar_rows = cur.execute(
+                        "SELECT bar_date, open, high, low, close, volume"
+                        " FROM selected_bars"
+                        " WHERE cycle_id = %s AND symbol = %s"
+                        " ORDER BY bar_date",
+                        (latest_cycle["id"], matched_sel["symbol"]),
+                    ).fetchall()
+                    bars_list = [
+                        Bar(
+                            r["bar_date"].isoformat(),
+                            float(r["open"]),
+                            float(r["high"]),
+                            float(r["low"]),
+                            float(r["close"]),
+                            float(r["volume"]),
+                        )
+                        for r in bar_rows
+                    ]
+                    stored_match = {
+                        "cycle_id": str(latest_cycle["id"]),
+                        "symbol": str(matched_sel["symbol"]),
+                        "sector": str(matched_sel["sector"]),
+                        "policy": ModePolicy(**latest_cycle["policy"]),
+                        "costs": TradeCosts(**latest_cycle["costs"]),
+                        "bars": bars_list,
+                    }
+
+    if mode == "stored" and stored_match is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"No stored cycle with >= 250 pinned bars found for {clean_symbol}.",
+        )
+
+    if stored_match is not None:
+        prompt, pinned = _build_quant_eval_prompt(
+            cycle_id=stored_match["cycle_id"],
+            symbol=stored_match["symbol"],
+            sector=stored_match["sector"],
+            policy=stored_match["policy"],
+            costs=stored_match["costs"],
+            bars=stored_match["bars"],
+            data_origin="stored_cycle",
+        )
+    else:
+        sector = _infer_sector(clean_symbol)
+        sample_cycle_id = f"sim-cycle-2026-11-18-{clean_symbol.lower().replace('/', '-')}"
+        synth_bars = _synthetic_pinned_bars(clean_symbol, count=260)
+        prompt, pinned = _build_quant_eval_prompt(
+            cycle_id=sample_cycle_id,
+            symbol=clean_symbol,
+            sector=sector,
+            policy=DEFAULT_POLICY,
+            costs=DEFAULT_COSTS,
+            bars=synth_bars,
+            data_origin="synthetic_pinned_260d",
+        )
+
+    return {
+        "prompt": prompt,
+        "pinned_identities": pinned,
+        "available_cycle_symbols": available_cycle_symbols,
+    }
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -394,7 +651,7 @@ def create_agent_task(
     request: Request,
     user_id: User,
 ) -> dict[str, Any]:
-    """Start a new agent task (`advisor` or `search`) or follow up on an owned finished task."""
+    """Start a new agent task (`advisor`, `quant_eval`, or `search`) or follow up an owned task."""
     _ = _get_hr_from_request(request)
     cleaned_input = payload.input.strip()
     if not cleaned_input:
@@ -413,7 +670,7 @@ def create_agent_task(
         if parent_id is not None:
             parent = cur.execute(
                 "SELECT id, kind, status, harness_task_id, session_id"
-                " FROM agent_tasks WHERE id = %s AND kind IN ('advisor', 'search')",
+                " FROM agent_tasks WHERE id = %s AND kind IN ('advisor', 'search', 'quant_eval')",
                 (parent_id,),
             ).fetchone()
             if parent is None:
@@ -515,7 +772,7 @@ def list_agent_tasks(
                 "SELECT id, kind, idempotency_key, cost_cap_usd, timeout_seconds,"
                 " harness_task_id, session_id, status, query_text, parent_task_id,"
                 " result_text, files, incomplete_reason, created_at, updated_at"
-                " FROM agent_tasks WHERE kind IN ('advisor', 'search')"
+                " FROM agent_tasks WHERE kind IN ('advisor', 'search', 'quant_eval')"
                 " ORDER BY created_at DESC, id DESC LIMIT 20"
             ).fetchall()
     return {
@@ -570,9 +827,12 @@ async def stream_agent_task_events(
     pool: ConnectionPool = request.app.state.pool
     row = await asyncio.to_thread(_fetch_owned_task, pool, user_id, task_id)
     feature_key = _resolve_feature_key(row.get("kind"))
-    starting_label = (
-        "Starting financial analysis" if feature_key == "advisor" else "Starting verification"
-    )
+    starting_labels: dict[FeatureKey, str] = {
+        "advisor": "Starting financial analysis",
+        "quant_eval": "Starting isolated CPU quant evaluation",
+        "search": "Starting verification",
+    }
+    starting_label = starting_labels[feature_key]
 
     async def event_generator() -> AsyncIterator[bytes]:
         if row["status"] in TERMINAL_STATUSES:
@@ -704,7 +964,7 @@ def create_agent_preview_app(
         with tenant_transaction(pool, user_id) as conn:
             row = conn.execute(
                 "SELECT session_id FROM agent_tasks"
-                " WHERE id = %s AND kind IN ('advisor', 'search')",
+                " WHERE id = %s AND kind IN ('advisor', 'search', 'quant_eval')",
                 (task_id,),
             ).fetchone()
         if row is None or not row[0]:

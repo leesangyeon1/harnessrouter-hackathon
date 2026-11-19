@@ -51,6 +51,7 @@ import {
   ChartNoAxesCombined,
   LayoutDashboard,
   Compass,
+  Cpu,
   SlidersHorizontal,
   CircleAlert,
 } from "lucide-react";
@@ -75,6 +76,7 @@ import {
 import { authConfigured, identityAuth } from "@/lib/firebase";
 import { CycleDiscovery } from "./cycle-discovery";
 import { FinanceAdvisor } from "./finance-advisor";
+import { QuantEmulator } from "./quant-emulator";
 import { SyncNotice } from "./sync-notice";
 import { TickerVerifier } from "./ticker-verifier";
 
@@ -85,6 +87,7 @@ type View =
   | "accounts"
   | "cards"
   | "investing"
+  | "quant"
   | "discovery"
   | "verifier"
   | "settings";
@@ -107,6 +110,7 @@ const navigation: {
     icon: TrendingUp,
     section: "GROW YOUR MONEY",
   },
+  { id: "quant", label: "Quant emulator", icon: Cpu },
   { id: "discovery", label: "Market discovery", icon: Compass },
   { id: "verifier", label: "Ticker verifier", icon: Sparkles },
 ];
@@ -117,6 +121,7 @@ const titles: Record<View, string> = {
   accounts: "All together, at last.",
   cards: "A clearer picture of credit.",
   investing: "A little room to explore.",
+  quant: "Test every signal cleanly.",
   discovery: "Look a little closer.",
   verifier: "Verify before you move.",
   settings: "Make yourself at home.",
@@ -801,7 +806,9 @@ export function FinanceApp() {
                         ? "Understand your balances, payments, and possibilities."
                         : view === "investing"
                           ? "Explore quantitative strategies with paper money."
-                          : view === "discovery"
+                          : view === "quant"
+                            ? "Run daily-v1 strategy models (M01–M08, M10, M11 vs. M00) in an isolated CPU sandbox."
+                            : view === "discovery"
                             ? "A focused view of stocks, bond ETFs, and crypto."
                             : view === "verifier"
                               ? "Identify and verify listed securities, bond ETFs, and crypto USD pairs from public sources."
@@ -811,7 +818,8 @@ export function FinanceApp() {
             <div className="heading-actions">
               {view === "discovery" ||
               view === "verifier" ||
-              view === "advisor" ? (
+              view === "advisor" ||
+              view === "quant" ? (
                 demo ? (
                   <button
                     className="button primary"
@@ -822,7 +830,9 @@ export function FinanceApp() {
                       ? "Sign in to verify"
                       : view === "advisor"
                         ? "Sign in to analyze"
-                        : "Sign in for latest cycle"}
+                        : view === "quant"
+                          ? "Sign in to run emulator"
+                          : "Sign in for latest cycle"}
                     <ArrowRight size={15} />
                   </button>
                 ) : (
@@ -831,7 +841,9 @@ export function FinanceApp() {
                       ? "Read-only public lookup"
                       : view === "advisor"
                         ? "Per-user advisor memory"
-                        : "Read-only screen"}
+                        : view === "quant"
+                          ? "Isolated CPU simulation"
+                          : "Read-only screen"}
                   </span>
                 )
               ) : (
@@ -1649,13 +1661,22 @@ export function FinanceApp() {
                           ? "Ranks by Sharpe ratio, with a 20% selection-window drawdown cap. Proposed policy v1 deploys up to 50% of strategy equity."
                           : "Ranks by net return. Proposed policy v1 deploys up to 100% of strategy equity. Both styles require positive confirmation."}
                       </p>
-                      <button
-                        className="button secondary"
-                        onClick={() => setDialog("mode")}
-                      >
-                        Compare paper modes
-                        <ArrowRight size={15} />
-                      </button>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          className="button secondary"
+                          onClick={() => setDialog("mode")}
+                        >
+                          Compare paper modes
+                          <ArrowRight size={15} />
+                        </button>
+                        <button
+                          className="button secondary"
+                          onClick={() => go("quant")}
+                        >
+                          <Cpu size={15} />
+                          Open CPU quant emulator
+                        </button>
+                      </div>
                     </section>
                   </div>
                   <section className="panel table-panel">
@@ -1898,6 +1919,14 @@ export function FinanceApp() {
 
           {view === "advisor" && (
             <FinanceAdvisor
+              api={verifierApi}
+              demo={demo}
+              onRequireSignIn={() => setDialog("auth")}
+            />
+          )}
+
+          {view === "quant" && (
+            <QuantEmulator
               api={verifierApi}
               demo={demo}
               onRequireSignIn={() => setDialog("auth")}
