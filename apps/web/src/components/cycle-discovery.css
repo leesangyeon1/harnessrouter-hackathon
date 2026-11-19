@@ -1,0 +1,147 @@
+.cycle-discovery {
+  display: grid;
+  gap: 18px;
+}
+.cycle-discovery .loading-banner,
+.cycle-discovery .error-banner {
+  margin: 0;
+}
+.cycle-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.cycle-summary h2 {
+  font-size: 20px;
+  margin: 7px 0;
+}
+.cycle-versions {
+  width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.cycle-versions strong {
+  margin-left: 5px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.cycle-source {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  background: #f7f9f7;
+  border: 1px solid #e7ece7;
+  border-radius: 8px;
+  padding: 15px;
+  margin: 0 0 22px;
+}
+.cycle-source dt {
+  font-size: 10px;
+  color: #65727a;
+  margin-bottom: 5px;
+}
+.cycle-source dd {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cycle-coverage h3 {
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+.cycle-coverage dl {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  padding: 1px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #e9edeb;
+  margin: 0 0 22px;
+}
+.cycle-coverage dl > div {
+  background: #fff;
+  padding: 13px 15px;
+}
+.cycle-coverage dt {
+  font-size: 10px;
+  color: #65727a;
+  overflow-wrap: anywhere;
+}
+.cycle-coverage dd {
+  margin: 5px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cycle-sector table code {
+  font-size: 11px;
+}
+.cycle-missing {
+  border: 1px dashed #dce3de;
+  border-radius: 8px;
+  padding: 20px;
+  font-size: 12px;
+  color: #65727a;
+}
+.cycle-measures {
+  margin: 14px 0;
+  color: #65727a;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.cycle-exclusions {
+  border-top: 1px solid var(--line);
+  padding-top: 15px;
+  color: #52665b;
+  font-size: 11px;
+}
+.cycle-exclusions summary {
+  cursor: pointer;
+  min-height: 30px;
+}
+.cycle-exclusions dl {
+  margin: 10px 0 0;
+}
+.cycle-exclusions dl > div {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) 2fr;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  gap: 15px;
+}
+.cycle-exclusions dt,
+.cycle-exclusions dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+@media (max-width: 700px) {
+  .cycle-summary {
+    align-items: flex-start;
+  }
+  .cycle-summary .button {
+    width: 100%;
+  }
+  .cycle-source {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .cycle-coverage dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cycle-sector {
+    padding: 20px 15px;
+  }
+  .cycle-sector table th,
+  .cycle-sector table td {
+    padding: 14px;
+  }
+}

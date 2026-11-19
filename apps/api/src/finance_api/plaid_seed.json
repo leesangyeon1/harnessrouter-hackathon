@@ -1,0 +1,127 @@
+{
+  "override_accounts": [
+    {
+      "type": "depository",
+      "subtype": "savings",
+      "starting_balance": 12000
+    },
+    {
+      "type": "credit",
+      "subtype": "credit card",
+      "starting_balance": 2400,
+      "liability": {
+        "type": "credit",
+        "purchase_apr": 24.99,
+        "cash_apr": 29.99,
+        "balance_transfer_apr": 24.99,
+        "special_apr": 0,
+        "last_payment_amount": 150,
+        "minimum_payment_amount": 60
+      },
+      "transactions": [
+        {
+          "currency": "USD",
+          "amount": 84.2,
+          "description": "Grocery store",
+          "days_ago": 47
+        },
+        {
+          "currency": "USD",
+          "amount": 46.5,
+          "description": "Gas station",
+          "days_ago": 41
+        },
+        {
+          "currency": "USD",
+          "amount": 129.99,
+          "description": "Airline ticket",
+          "days_ago": 33
+        },
+        {
+          "currency": "USD",
+          "amount": 91.75,
+          "description": "Grocery store",
+          "days_ago": 17
+        },
+        {
+          "currency": "USD",
+          "amount": 38.4,
+          "description": "Restaurant",
+          "days_ago": 11
+        }
+      ]
+    },
+    {
+      "type": "credit",
+      "subtype": "credit card",
+      "starting_balance": 800,
+      "liability": {
+        "type": "credit",
+        "purchase_apr": 17.49,
+        "cash_apr": 27.49,
+        "balance_transfer_apr": 17.49,
+        "special_apr": 0,
+        "last_payment_amount": 100,
+        "minimum_payment_amount": 25
+      }
+    },
+    {
+      "type": "loan",
+      "subtype": "student",
+      "liability": {
+        "type": "student",
+        "origination_date": "2024-06-01",
+        "principal": 18000,
+        "nominal_apr": 5.8,
+        "loan_name": "Student loan",
+        "repayment_model": {
+          "type": "standard",
+          "non_repayment_months": 0,
+          "repayment_months": 120
+        }
+      }
+    },
+    {
+      "type": "loan",
+      "subtype": "loan",
+      "liability": {
+        "type": "loan",
+        "interest_rate": {
+          "percentage": 11.5,
+          "type": "fixed"
+        },
+        "principal_balance": 9000,
+        "loan_term_months": 48,
+        "maturity_date": "2029-06-01"
+      }
+    },
+    {
+      "type": "investment",
+      "subtype": "brokerage",
+      "holdings": [
+        {
+          "institution_price": 280,
+          "institution_price_as_of": "2026-11-13",
+          "cost_basis": 250,
+          "quantity": 10,
+          "currency": "USD",
+          "security": {
+            "ticker_symbol": "VTI",
+            "currency": "USD"
+          }
+        },
+        {
+          "institution_price": 73,
+          "institution_price_as_of": "2026-11-13",
+          "cost_basis": 75,
+          "quantity": 20,
+          "currency": "USD",
+          "security": {
+            "ticker_symbol": "BND",
+            "currency": "USD"
+          }
+        }
+      ]
+    }
+  ]
+}

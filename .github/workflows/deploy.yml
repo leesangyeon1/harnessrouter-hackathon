@@ -1,0 +1,472 @@
+name: deploy
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target GitHub/GCP environment (e.g., prod, staging, dev)"
+        required: true
+        default: "dev"
+        type: string
+      action:
+        description: "Deployment action"
+        required: true
+        default: "apply-and-deploy"
+        type: choice
+        options:
+          - plan
+          - apply-and-deploy
+          - deploy
+          - rollback
+      rollback_service:
+        description: "Service suffix to roll back when action=rollback (api, worker, web, admin)"
+        required: false
+        default: "api"
+        type: choice
+        options:
+          - api
+          - worker
+          - web
+          - admin
+      rollback_revision:
+        description: "Exact Cloud Run revision name for action=rollback"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Gate, Terraform Validate & Image Build Check
+    if: ${{ (inputs.action || 'apply-and-deploy') != 'rollback' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Python workspace gate (lint, strict mypy, pytest + RLS)
+        uses: astral-sh/setup-uv@v5
+      - run: uv sync --all-packages --locked
+      - run: make gate
+
+      - name: Set up Node 22 for web & admin checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/admin/package-lock.json
+
+      - name: Run Customer & Operations Next.js checks
+        run: |
+          npm --prefix apps/web ci --no-audit --no-fund
+          npm --prefix apps/web run check
+          npm --prefix apps/admin ci --no-audit --no-fund
+          npm --prefix apps/admin run check
+
+      - name: Validate Terraform formatting and schema
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+      - name: Terraform fmt & offline validate
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false
+          terraform validate
+
+      - name: Build production API, Customer Web & Operations Admin containers + secret scan
+        run: |
+          ./deploy/scripts/verify_bundle_secrets.sh --repo apps/api/src apps/web/src apps/admin/src packages infra deploy/docker
+          docker build -f apps/api/Dockerfile -t finance-api:${GITHUB_SHA} .
+          docker run --rm finance-api:${GITHUB_SHA} python -c "import finance_api.app, finance_api.task_worker, finance_api.migrate, finance_api.bootstrap_roles, finance_api.jobs, finance_api.market_ingest"
+
+          docker build -f apps/web/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_BASE_URL=https://api.placeholder.invalid \
+            --build-arg NEXT_PUBLIC_IDENTITY_PROJECT_ID=placeholder-project \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=placeholder-public-key \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=placeholder-project.firebaseapp.com \
+            --build-arg NEXT_PUBLIC_ADMIN_URL=https://admin.placeholder.invalid \
+            -t finance-web:${GITHUB_SHA} .
+
+          docker build -f apps/admin/Dockerfile \
+            --build-arg NEXT_PUBLIC_IDENTITY_PROJECT_ID=placeholder-project \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY=placeholder-public-key \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=placeholder-project.firebaseapp.com \
+            --build-arg NEXT_PUBLIC_CUSTOMER_URL=https://web.placeholder.invalid \
+            -t finance-admin:${GITHUB_SHA} .
+
+          # Extract built static bundles from both containers and scan for backend secret names/values
+          CID_WEB="$(docker create finance-web:${GITHUB_SHA})"
+          CID_ADM="$(docker create finance-admin:${GITHUB_SHA})"
+          mkdir -p /tmp/bundle-scan/web /tmp/bundle-scan/admin
+          docker cp "${CID_WEB}:/app/apps/web/.next/static" /tmp/bundle-scan/web/static
+          docker cp "${CID_ADM}:/app/apps/admin/.next/static" /tmp/bundle-scan/admin/static
+          docker rm "${CID_WEB}" "${CID_ADM}" >/dev/null
+          ./deploy/scripts/verify_bundle_secrets.sh --frontend-bundle /tmp/bundle-scan
+
+  terraform-plan:
+    name: Terraform Plan Against Live GCP (OIDC)
+    needs: verify
+    if: >-
+      github.event_name != 'pull_request' &&
+      (inputs.action || 'apply-and-deploy') != 'rollback' &&
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' &&
+      vars.TF_STATE_BUCKET != ''
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      ENV_NAME: ${{ inputs.environment || vars.DEPLOY_ENV || (github.ref_name == 'main' && 'prod' || 'dev') }}
+      NAME_PREFIX: ${{ vars.NAME_PREFIX || 'hr-finance' }}
+      CORS_ORIGINS_JSON: ${{ vars.CORS_ALLOWED_ORIGINS_JSON || '[]' }}
+      ADMIN_APP_ORIGIN: ${{ vars.ADMIN_APP_ORIGIN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via OIDC
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Terraform Init, Adopt Existing Web Service & Plan
+        working-directory: infra/terraform
+        run: |
+          REPO="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${NAME_PREFIX}-${ENV_NAME}-containers"
+          DB_TIER="${{ vars.DB_TIER || (github.ref_name == 'main' && 'db-custom-2-7680' || 'db-custom-1-3840') }}"
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${NAME_PREFIX}/${ENV_NAME}"
+
+          if gcloud run services describe "${NAME_PREFIX}-${ENV_NAME}-web" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" >/dev/null 2>&1; then
+            if ! terraform state show 'google_cloud_run_v2_service.web[0]' >/dev/null 2>&1; then
+              terraform import \
+                -var="project_id=${GCP_PROJECT_ID}" \
+                -var="region=${GCP_REGION}" \
+                -var="environment=${ENV_NAME}" \
+                -var="api_image=${REPO}/finance-api:${GITHUB_SHA}" \
+                -var="deploy_web_service=true" \
+                -var="web_image=${REPO}/finance-web:${GITHUB_SHA}" \
+                -var="deploy_admin_service=true" \
+                -var="admin_image=${REPO}/finance-admin:${GITHUB_SHA}" \
+                -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
+                -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+                -var="db_tier=${DB_TIER}" \
+                'google_cloud_run_v2_service.web[0]' \
+                "projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/services/${NAME_PREFIX}-${ENV_NAME}-web"
+            fi
+          fi
+
+          terraform plan \
+            -var="project_id=${GCP_PROJECT_ID}" \
+            -var="region=${GCP_REGION}" \
+            -var="environment=${ENV_NAME}" \
+            -var="api_image=${REPO}/finance-api:${GITHUB_SHA}" \
+            -var="deploy_web_service=true" \
+            -var="web_image=${REPO}/finance-web:${GITHUB_SHA}" \
+            -var="deploy_admin_service=true" \
+            -var="admin_image=${REPO}/finance-admin:${GITHUB_SHA}" \
+            -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
+            -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+            -var="db_tier=${DB_TIER}" \
+            -out=tfplan
+
+  deploy:
+    name: Push Images, Apply Infra, Run DB Migration & Deploy Cloud Run
+    needs: [verify, terraform-plan]
+    if: >-
+      always() &&
+      needs.verify.result == 'success' &&
+      (needs.terraform-plan.result == 'success' || needs.terraform-plan.result == 'skipped') &&
+      github.event_name != 'pull_request' &&
+      (inputs.action == '' || inputs.action == 'deploy' || inputs.action == 'apply-and-deploy') &&
+      vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || (github.ref_name == 'main' && 'prod' || 'dev') }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      ENV_NAME: ${{ inputs.environment || vars.DEPLOY_ENV || (github.ref_name == 'main' && 'prod' || 'dev') }}
+      NAME_PREFIX: ${{ vars.NAME_PREFIX || 'hr-finance' }}
+      CORS_ORIGINS_JSON: ${{ vars.CORS_ALLOWED_ORIGINS_JSON || '[]' }}
+      ADMIN_APP_ORIGIN: ${{ vars.ADMIN_APP_ORIGIN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via OIDC (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK & Artifact Registry Docker auth
+        uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+      - uses: hashicorp/setup-terraform@v3
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Bootstrap foundational GCP resources (Registry, Cloud SQL, Secret containers)
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
+        working-directory: infra/terraform
+        run: |
+          DB_TIER="${{ vars.DB_TIER || (github.ref_name == 'main' && 'db-custom-2-7680' || 'db-custom-1-3840') }}"
+          REPO="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${NAME_PREFIX}-${ENV_NAME}-containers"
+          terraform init \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="prefix=${NAME_PREFIX}/${ENV_NAME}"
+          terraform apply -auto-approve \
+            -target=google_project_service.required \
+            -target=google_artifact_registry_repository.containers \
+            -target=google_secret_manager_secret.managed \
+            -target=google_sql_database_instance.postgres \
+            -target=google_sql_database.finance \
+            -var="project_id=${GCP_PROJECT_ID}" \
+            -var="region=${GCP_REGION}" \
+            -var="environment=${ENV_NAME}" \
+            -var="api_image=${REPO}/finance-api:${GITHUB_SHA}" \
+            -var="db_tier=${DB_TIER}"
+
+      - name: Ensure initial Secret Manager versions exist
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
+        run: |
+          chmod +x ./deploy/scripts/ensure_initial_secrets.sh
+          ./deploy/scripts/ensure_initial_secrets.sh "${GCP_PROJECT_ID}" "${GCP_REGION}" "${ENV_NAME}" "${NAME_PREFIX}"
+
+      - name: Build and push immutable API, Customer Web & Operations Admin images
+        id: build
+        run: |
+          REPO="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${NAME_PREFIX}-${ENV_NAME}-containers"
+          API_IMG="${REPO}/finance-api:${GITHUB_SHA}"
+          WEB_IMG="${REPO}/finance-web:${GITHUB_SHA}"
+          ADMIN_IMG="${REPO}/finance-admin:${GITHUB_SHA}"
+
+          docker build -f apps/api/Dockerfile -t "${API_IMG}" .
+          docker push "${API_IMG}"
+
+          docker build -f apps/web/Dockerfile \
+            --build-arg NEXT_PUBLIC_API_BASE_URL="${{ vars.NEXT_PUBLIC_API_BASE_URL }}" \
+            --build-arg NEXT_PUBLIC_IDENTITY_PROJECT_ID="${{ vars.IDENTITY_PROJECT_ID || vars.GCP_PROJECT_ID }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg NEXT_PUBLIC_ADMIN_URL="${{ vars.NEXT_PUBLIC_ADMIN_URL }}" \
+            -t "${WEB_IMG}" .
+          docker push "${WEB_IMG}"
+
+          docker build -f apps/admin/Dockerfile \
+            --build-arg NEXT_PUBLIC_IDENTITY_PROJECT_ID="${{ vars.IDENTITY_PROJECT_ID || vars.GCP_PROJECT_ID }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_API_KEY="${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}" \
+            --build-arg NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}" \
+            --build-arg NEXT_PUBLIC_CUSTOMER_URL="${{ vars.NEXT_PUBLIC_CUSTOMER_URL }}" \
+            -t "${ADMIN_IMG}" .
+          docker push "${ADMIN_IMG}"
+
+          echo "api_image=${API_IMG}" >> "${GITHUB_OUTPUT}"
+          echo "web_image=${WEB_IMG}" >> "${GITHUB_OUTPUT}"
+          echo "admin_image=${ADMIN_IMG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Record current revisions prior to rollout
+        id: prev
+        run: |
+          PREFIX="${NAME_PREFIX}-${ENV_NAME}"
+          PREV_API="$(gcloud run services describe "${PREFIX}-api" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
+          PREV_WORKER="$(gcloud run services describe "${PREFIX}-worker" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
+          PREV_WEB="$(gcloud run services describe "${PREFIX}-web" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
+          PREV_ADMIN="$(gcloud run services describe "${PREFIX}-admin" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.latestReadyRevisionName)' 2>/dev/null || true)"
+          echo "api_rev=${PREV_API}" >> "${GITHUB_OUTPUT}"
+          echo "worker_rev=${PREV_WORKER}" >> "${GITHUB_OUTPUT}"
+          echo "web_rev=${PREV_WEB}" >> "${GITHUB_OUTPUT}"
+          echo "admin_rev=${PREV_ADMIN}" >> "${GITHUB_OUTPUT}"
+
+      - name: Apply full Terraform stack (IAM, Cloud Tasks, Jobs, API, Worker, Web, Admin, Monitoring)
+        if: (inputs.action == '' || inputs.action == 'apply-and-deploy') && env.TF_STATE_BUCKET != ''
+        working-directory: infra/terraform
+        run: |
+          DB_TIER="${{ vars.DB_TIER || (github.ref_name == 'main' && 'db-custom-2-7680' || 'db-custom-1-3840') }}"
+          terraform apply -auto-approve \
+            -var="project_id=${GCP_PROJECT_ID}" \
+            -var="region=${GCP_REGION}" \
+            -var="environment=${ENV_NAME}" \
+            -var="api_image=${{ steps.build.outputs.api_image }}" \
+            -var="deploy_web_service=true" \
+            -var="web_image=${{ steps.build.outputs.web_image }}" \
+            -var="deploy_admin_service=true" \
+            -var="admin_image=${{ steps.build.outputs.admin_image }}" \
+            -var="admin_app_origin=${ADMIN_APP_ORIGIN}" \
+            -var="cors_allowed_origins=${CORS_ORIGINS_JSON}" \
+            -var="db_tier=${DB_TIER}"
+
+      - name: Update and execute DB migration & runtime role bootstrap job (aborts deploy on failure)
+        run: |
+          MIGRATE_JOB="${NAME_PREFIX}-${ENV_NAME}-db-migrate"
+          gcloud run jobs update "${MIGRATE_JOB}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${{ steps.build.outputs.api_image }}" \
+            --quiet
+          gcloud run jobs execute "${MIGRATE_JOB}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --wait
+
+      - name: Update Cloud Run Jobs & Services to new revision
+        id: rollout
+        run: |
+          PREFIX="${NAME_PREFIX}-${ENV_NAME}"
+          IMG="${{ steps.build.outputs.api_image }}"
+
+          for job in market-ingest paper-order agent-task; do
+            gcloud run jobs update "${PREFIX}-${job}" \
+              --project="${GCP_PROJECT_ID}" \
+              --region="${GCP_REGION}" \
+              --image="${IMG}" \
+              --quiet
+          done
+
+          gcloud run services update "${PREFIX}-worker" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${IMG}" \
+            --quiet
+
+          gcloud run services update "${PREFIX}-api" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${IMG}" \
+            --quiet
+
+          gcloud run services update "${PREFIX}-web" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${{ steps.build.outputs.web_image }}" \
+            --quiet
+
+          gcloud run services update "${PREFIX}-admin" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --image="${{ steps.build.outputs.admin_image }}" \
+            --quiet
+
+      - name: Post-deploy readiness, UI, CORS & security smoke checks
+        id: smoke
+        run: |
+          PREFIX="${NAME_PREFIX}-${ENV_NAME}"
+          API_URL="$(gcloud run services describe "${PREFIX}-api" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          WORKER_URL="$(gcloud run services describe "${PREFIX}-worker" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          WEB_URL="$(gcloud run services describe "${PREFIX}-web" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+          ADMIN_URL="$(gcloud run services describe "${PREFIX}-admin" --project="${GCP_PROJECT_ID}" --region="${GCP_REGION}" --format='value(status.url)')"
+
+          echo "Customer Web URL: ${WEB_URL}"
+          echo "Operations Admin URL: ${ADMIN_URL}"
+          echo "API URL: ${API_URL}"
+          echo "Worker URL: ${WORKER_URL}"
+
+          curl -fsS --retry 6 --retry-delay 5 --retry-all-errors "${API_URL}/health/ready" | grep -q '"ready"'
+
+          WEB_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' "${WEB_URL}/")"
+          test "${WEB_STATUS}" = "200"
+
+          ADMIN_ROOT="$(curl -sS -o /dev/null -w '%{http_code}' "${ADMIN_URL}/")"
+          test "${ADMIN_ROOT}" = "200"
+
+          ADMIN_API_UNAUTH="$(curl -sS -o /dev/null -w '%{http_code}' "${ADMIN_URL}/api/worker-tokens")"
+          test "${ADMIN_API_UNAUTH}" = "401"
+
+          API_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' "${API_URL}/v1/me")"
+          test "${API_UNAUTH}" = "401"
+
+          WORKER_UNAUTH="$(curl -s -o /dev/null -w '%{http_code}' -X POST "${WORKER_URL}/internal/tasks/harness")"
+          test "${WORKER_UNAUTH}" = "401" -o "${WORKER_UNAUTH}" = "403"
+
+      - name: Automatic revision rollback on deploy or smoke failure
+        if: failure() && (steps.rollout.conclusion == 'failure' || steps.smoke.conclusion == 'failure')
+        run: |
+          PREFIX="${NAME_PREFIX}-${ENV_NAME}"
+          for pair in \
+            "api:${{ steps.prev.outputs.api_rev }}" \
+            "worker:${{ steps.prev.outputs.worker_rev }}" \
+            "web:${{ steps.prev.outputs.web_rev }}" \
+            "admin:${{ steps.prev.outputs.admin_rev }}"; do
+            SVC_SUFFIX="${pair%%:*}"
+            REV="${pair##*:}"
+            if [ -n "${REV}" ]; then
+              gcloud run services update-traffic "${PREFIX}-${SVC_SUFFIX}" \
+                --project="${GCP_PROJECT_ID}" \
+                --region="${GCP_REGION}" \
+                --to-revisions="${REV}=100" \
+                --quiet || true
+            fi
+          done
+
+  rollback:
+    name: Manual Cloud Run Revision Rollback
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.action == 'rollback' }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'prod' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Require rollback_revision input
+        run: |
+          if [ -z "${{ inputs.rollback_revision }}" ]; then
+            echo "ERROR: rollback_revision input is required when action=rollback" >&2
+            exit 1
+          fi
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Shift 100% traffic to target revision
+        run: |
+          SVC="${{ vars.NAME_PREFIX || 'hr-finance' }}-${{ inputs.environment }}-${{ inputs.rollback_service }}"
+          gcloud run services update-traffic "${SVC}" \
+            --project="${{ vars.GCP_PROJECT_ID }}" \
+            --region="${{ vars.GCP_REGION }}" \
+            --to-revisions="${{ inputs.rollback_revision }}=100"
