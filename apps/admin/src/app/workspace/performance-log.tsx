@@ -366,8 +366,8 @@ export function PerformanceLog({
           <Award size={16} />
           <span>
             Quant Case Log ({QUANT_BENCHMARK_SUMMARY.totalCases} cases ·{" "}
-            {QUANT_BENCHMARK_SUMMARY.profitRatePct.toFixed(0)}% profit /{" "}
-            {QUANT_BENCHMARK_SUMMARY.lossRatePct.toFixed(0)}% loss)
+            {QUANT_BENCHMARK_SUMMARY.lossRatePct.toFixed(0)}% loss /{" "}
+            {QUANT_BENCHMARK_SUMMARY.profitRatePct.toFixed(0)}% winning)
           </span>
         </button>
         <button
