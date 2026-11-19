@@ -295,7 +295,10 @@ def test_agent_routes_support_advisor_and_search_harnesses_with_tenancy_and_file
             elif target_hid == QUANT_EVAL_HARNESS_ID:
                 sid = SID_QUANT
                 rid = RID_QUANT
-                text = json.dumps(SAMPLE_QUANT_JSON)
+                text = (
+                    "All identity verifications pass. Here is the final result:\n\n"
+                    f"```json\n{json.dumps(SAMPLE_QUANT_JSON, indent=2)}\n```"
+                )
             else:
                 sid = SID
                 rid = RID_FOLLOW if payload.get("previous_response_id") else RID

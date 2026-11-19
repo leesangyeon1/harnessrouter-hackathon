@@ -20,6 +20,7 @@ import inspect
 import json
 import logging
 import math
+import re
 import threading
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict
@@ -134,19 +135,28 @@ def _sanitize_file_entries(raw_files: list[Json]) -> list[dict[str, Any]]:
     return cleaned
 
 
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+
+
 def _extract_json_dict(raw_text: str | None) -> dict[str, Any] | None:
     if not raw_text:
         return None
     stripped = raw_text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.splitlines()
-        if len(lines) >= 3 and lines[-1].strip() == "```":
-            stripped = "\n".join(lines[1:-1]).strip()
-    try:
-        parsed = json.loads(stripped)
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
+    candidates: list[str] = [stripped]
+    for match in _JSON_FENCE_RE.finditer(stripped):
+        candidates.insert(0, match.group(1).strip())
+    first_brace = stripped.find("{")
+    last_brace = stripped.rfind("}")
+    if 0 <= first_brace < last_brace:
+        candidates.append(stripped[first_brace : last_brace + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            continue
+    return None
 
 
 def parse_structured_answer(raw_text: str | None) -> dict[str, Any] | None:

@@ -161,8 +161,8 @@ def to_progress(ev: Json) -> Json | None:
                 label = "Writing files"
             elif re.search(r"read|grep|glob|ls", fn_name):
                 label = "Reading files"
-            elif re.search(r"bash|shell|exec", fn_name):
-                label = "Running verification step"
+            elif re.search(r"bash|shell|exec|terminal|python", fn_name):
+                label = "Running isolated verification step"
             elif re.search(r"search|fetch|browse|web|http", fn_name):
                 label = "Checking authoritative public sources"
             else:
